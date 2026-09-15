@@ -3,11 +3,11 @@ Start command handler
 """
 
 import logging
-from vkbottle.bot import Message
 from src.database.database import get_session
 from src.handlers.state_manager import state_manager
 from src.keyboards.reply_keyboards import get_main_menu_keyboard
 from src.services.user_service import UserService
+from src.vk_client import Message, VKAPIError, vk_client
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +23,20 @@ async def handle_start(message: Message):
             is_admin = await user_service.sync_admin_status(vk_id)
             keyboard = get_main_menu_keyboard(is_admin)
 
-            await message.answer(
+            await vk_client.send_message(
+                message.peer_id,
                 f"Привет, {user.first_name}! Рад снова тебя видеть! 🎉",
                 keyboard=keyboard,
             )
+    except VKAPIError as e:
+        # Не пытаемся отправить fallback-сообщение: если VK API запретил
+        # отправку (например, ошибка 912 «Возможности ботов»), повторная
+        # отправка тоже упадёт. Пробрасываем ошибку в глобальный обработчик.
+        logger.error(f"VK API error {e.code} in handle_start for VK ID {vk_id}: {e}")
+        raise
     except Exception as e:
         logger.error(f"Error in handle_start for VK ID {vk_id}: {e}", exc_info=True)
-        await message.answer("Привет! Напиши 'Главное меню' для начала работы.")
+        try:
+            await vk_client.send_message(message.peer_id, "Привет! Напиши 'Главное меню' для начала работы.")
+        except Exception as send_err:
+            logger.error(f"Failed to send fallback message to VK ID {vk_id}: {send_err}")

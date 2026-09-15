@@ -3,9 +3,8 @@ Practice handlers for solving tasks and checking statistics
 """
 
 import re
-import aiohttp
 import logging
-from vkbottle.bot import Message
+
 from src.config import settings
 from src.database.database import get_session
 from src.handlers.state_manager import state_manager
@@ -13,6 +12,7 @@ from src.keyboards.inline_keyboards import get_task_action_keyboard
 from src.keyboards.reply_keyboards import get_main_menu_keyboard, get_task_keyboard
 from src.services.task_service import TaskService
 from src.services.user_service import UserService
+from src.vk_client import Message, vk_client
 
 logger = logging.getLogger(__name__)
 
@@ -23,41 +23,14 @@ async def send_vk_message(
     keyboard: str | None = None,
     attachment: str | None = None,
 ):
-    """Safely send a VK message with fallback if photo attachment is rejected by VK API."""
+    """Safely send a VK message; the client retries without attachment if VK rejects it."""
     peer_id = getattr(message, "peer_id", getattr(message, "from_id", None))
-
-    if attachment:
-        url = "https://api.vk.com/method/messages.send"
-        params = {
-            "access_token": settings.bot_token,
-            "v": "5.131",
-            "peer_id": peer_id,
-            "message": text,
-            "attachment": attachment,
-            "random_id": 0,
-        }
-        if keyboard:
-            params["keyboard"] = keyboard
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, data=params) as resp:
-                data = await resp.json()
-                logger.info(f"VK API messages.send response: {data}")
-
-                if "error" in data:
-                    logger.warning(
-                        f"VK API rejected attachment '{attachment}': {data['error']}. "
-                        f"Sending message without attachment as fallback."
-                    )
-                    params.pop("attachment", None)
-                    async with session.post(url, data=params) as resp2:
-                        return await resp2.json()
-                return data
-    else:
-        if keyboard:
-            await message.answer(text, keyboard=keyboard)
-        else:
-            await message.answer(text)
+    await vk_client.send_message(
+        peer_id=peer_id,
+        text=text,
+        keyboard=keyboard,
+        attachment=attachment,
+    )
 
 
 async def send_next_task(
@@ -72,6 +45,7 @@ async def send_next_task(
         task_service = TaskService(session)
 
         user = await user_service.get_or_create_user(vk_id)
+        caption = ""
 
         if task_mode == "number" and selected_number:
             task = await task_service.get_task_by_number(selected_number, user.solved_tasks)
@@ -88,13 +62,15 @@ async def send_next_task(
             is_admin = user.is_admin or (vk_id in settings.admin_ids_list)
             kb = get_main_menu_keyboard(is_admin)
             if task_mode == "number" and selected_number:
-                await message.answer(
+                await vk_client.send_message(
+                    message.peer_id,
                     f"🎉 В базе нет доступных нерешенных заданий №{selected_number}!\n"
                     "Зайдите в '⚙️ Админ панель' -> '➕ Добавить задание' или выберите другой номер.",
                     keyboard=kb,
                 )
             else:
-                await message.answer(
+                await vk_client.send_message(
+                    message.peer_id,
                     "🎉 В базе пока нет доступных заданий!\n"
                     "Перейдите в '⚙️ Админ панель' -> '➕ Добавить задание', чтобы занести задачи.",
                     keyboard=kb,
@@ -139,7 +115,7 @@ async def handle_practice_flow(message: Message):
             user = await user_service.get_or_create_user(vk_id)
             is_admin = user.is_admin or (vk_id in settings.admin_ids_list)
 
-        await message.answer("Главное меню 👇", keyboard=get_main_menu_keyboard(is_admin))
+        await vk_client.send_message(message.peer_id, "Главное меню 👇", keyboard=get_main_menu_keyboard(is_admin))
         return
 
     # 2. ПРИОРИТЕТНАЯ ПРОВЕРКА ОТВЕТА ПОЛЬЗОВАТЕЛЯ
@@ -147,13 +123,22 @@ async def handle_practice_flow(message: Message):
         expected = state_data.get("expected_answer")
         task_id = state_data.get("current_task_id")
 
-        async with get_session() as session:
-            user_service = UserService(session)
-            task_service = TaskService(session)
+        try:
+            if expected is None or not task_id:
+                # Повреждённое состояние — сбрасываем и просим начать заново
+                await vk_client.send_message(
+                    message.peer_id,
+                    "⚠️ Состояние потеряно. Выбери задание заново.",
+                    keyboard=get_task_action_keyboard(),
+                )
+                return
 
-            await user_service.get_or_create_user(vk_id)
+            async with get_session() as session:
+                user_service = UserService(session)
+                task_service = TaskService(session)
 
-            if expected is not None and task_id:
+                await user_service.get_or_create_user(vk_id)
+
                 user_answer = raw_text.replace(",", ".").strip().lower()
                 expected_clean = str(expected).replace(",", ".").strip().lower()
                 is_correct = user_answer == expected_clean
@@ -162,13 +147,20 @@ async def handle_practice_flow(message: Message):
                 await task_service.add_answer_history(vk_id, task_id, is_correct)
 
                 result_text = "✅ Верно!" if is_correct else "❌ Неправильно"
-                await message.answer(
+                await vk_client.send_message(
+                    message.peer_id,
                     f"{result_text}\nПравильный ответ: {expected}",
                     keyboard=get_task_action_keyboard(),
                 )
-
-        # Мгновенная очистка состояния ответа
-        await state_manager.clear_state(vk_id)
+        except Exception:
+            logger.exception(f"Error checking answer for VK ID {vk_id}")
+            await vk_client.send_message(
+                message.peer_id,
+                "⚠️ Ошибка при проверке ответа. Попробуйте отправить его ещё раз.",
+            )
+        finally:
+            # Состояние очищается всегда, чтобы пользователь не застрял
+            await state_manager.clear_state(vk_id)
         return
 
     # 3. Выбор случайного задания или конкретного номера (1-20)
@@ -178,7 +170,7 @@ async def handle_practice_flow(message: Message):
         else:
             num = int(raw_text)
             if not 1 <= num <= 20:
-                await message.answer("Пожалуйста, выбери номер задания от 1 до 20")
+                await vk_client.send_message(message.peer_id, "Пожалуйста, выбери номер задания от 1 до 20")
                 return
             await send_next_task(message, vk_id, task_mode="number", selected_number=num)
         return
@@ -196,7 +188,8 @@ async def handle_my_stats(message: Message):
             stats = await task_service.get_user_stats(vk_id)
 
             if stats["total"] == 0:
-                await message.answer(
+                await vk_client.send_message(
+                    message.peer_id,
                     "📈 У тебя пока нет решённых заданий.\n"
                     "Нажми на цифру или 🎲 Случайное задание, чтобы начать!"
                 )
@@ -219,7 +212,7 @@ async def handle_my_stats(message: Message):
                     pct = (b["correct"] / b["total"] * 100) if b["total"] else 0
                     lines.append(f"  №{num}: {b['correct']}/{b['total']} ({pct:.0f}%)")
 
-            await message.answer("\n".join(lines))
+            await vk_client.send_message(message.peer_id, "\n".join(lines))
     except Exception as e:
         logger.error(f"Error in handle_my_stats for VK ID {vk_id}: {e}", exc_info=True)
-        await message.answer("📈 Статистика временно недоступна. Попробуйте еще раз позже.")
+        await vk_client.send_message(message.peer_id, "📈 Статистика временно недоступна. Попробуйте еще раз позже.")

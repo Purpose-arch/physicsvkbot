@@ -10,7 +10,13 @@ class StatsService:
     async def get_current_stats(self) -> dict:
         users_count = (await self.session.execute(select(func.count()).select_from(User))).scalar() or 0
         total_answers = (await self.session.execute(select(func.count()).select_from(AnswerHistory))).scalar() or 0
-        correct_answers = (await self.session.execute(select(func.count()).where(AnswerHistory.is_correct == True))).scalar() or 0
+        correct_answers = (
+            await self.session.execute(
+                select(func.count())
+                .select_from(AnswerHistory)
+                .where(AnswerHistory.is_correct == True)  # noqa: E712
+            )
+        ).scalar() or 0
 
         avg_accuracy = (correct_answers / total_answers * 100) if total_answers else 0.0
 

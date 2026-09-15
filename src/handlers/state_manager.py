@@ -11,9 +11,19 @@ from src.database.models import UserStateModel
 logger = logging.getLogger(__name__)
 
 
+CACHE_MAX_SIZE = 10_000
+
+
 class FSMStateManager:
     def __init__(self):
         self._cache: dict[int, dict] = {}
+
+    def _cache_put(self, vk_id: int, data: dict):
+        """Simple size-bounded cache to prevent unbounded memory growth."""
+        if len(self._cache) >= CACHE_MAX_SIZE and vk_id not in self._cache:
+            # Удаляем произвольную (первую) запись
+            self._cache.pop(next(iter(self._cache)))
+        self._cache[vk_id] = data
 
     async def get_data(self, vk_id: int) -> dict:
         if vk_id in self._cache:
@@ -26,7 +36,7 @@ class FSMStateManager:
                 obj = res.scalar_one_or_none()
                 if obj and obj.data_json:
                     data = json.loads(obj.data_json)
-                    self._cache[vk_id] = data
+                    self._cache_put(vk_id, data)
                     return data
         except Exception as e:
             logger.error(f"Error reading state for {vk_id}: {e}")
@@ -39,7 +49,7 @@ class FSMStateManager:
 
     async def set_state(self, vk_id: int, state: str, **kwargs):
         data = {"state": state, **kwargs}
-        self._cache[vk_id] = data
+        self._cache_put(vk_id, data)
         data_json = json.dumps(data, ensure_ascii=False)
 
         try:

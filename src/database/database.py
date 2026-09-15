@@ -15,13 +15,20 @@ from src.database.models import Base
 logger = logging.getLogger(__name__)
 
 # Асинхронный движок с прогревом пула и без кэширования подготовленных запросов
-engine = create_async_engine(
-    settings.database_url,
-    echo=False,
-    future=True,
-    pool_pre_ping=True,  # Автоматическая проверка активности соединения
-    connect_args={"statement_cache_size": 0},
-)
+def _build_engine_kwargs() -> dict:
+    """Engine kwargs depend on the underlying driver."""
+    kwargs: dict = {
+        "echo": False,
+        "future": True,
+        "pool_pre_ping": True,  # Автоматическая проверка активности соединения
+    }
+    if settings.database_url.startswith("postgresql"):
+        # Отключаем подготовленные выражения asyncpg (важно за pgbouncer)
+        kwargs["connect_args"] = {"statement_cache_size": 0}
+    return kwargs
+
+
+engine = create_async_engine(settings.database_url, **_build_engine_kwargs())
 
 # Фабрика асинхронных сессий
 AsyncSessionLocal = async_sessionmaker(

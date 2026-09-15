@@ -1,5 +1,6 @@
-vkbottle
-sqlalchemy
-asyncpg
-pydantic-settings
-python-dotenv
+sqlalchemy>=2.0
+aiosqlite>=0.19
+asyncpg>=0.29; platform_system != "Darwin" or python_version >= "3.9"
+aiohttp>=3.9
+pydantic-settings>=2.0
+python-dotenv>=1.0

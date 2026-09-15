@@ -1,9 +1,7 @@
-"""
-Admin handlers for the VK Physics EGE Bot
-"""
+"""Admin handlers for the VK Physics EGE Bot"""
 
 import logging
-from vkbottle.bot import Message
+
 from src.config import settings
 from src.database.database import get_session
 from src.database.models import Task
@@ -16,6 +14,7 @@ from src.keyboards.reply_keyboards import (
 )
 from src.services.stats_service import StatsService
 from src.services.user_service import UserService
+from src.vk_client import Message, vk_client
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +31,12 @@ async def is_admin_user(message: Message) -> bool:
         if user and user.is_admin:
             return True
 
-    await message.answer("У тебя нет доступа к этой функции.")
+    await vk_client.send_message(message.peer_id, "У тебя нет доступа к этой функции.")
     return False
 
 
 def extract_photo_attachment(message: Message) -> str | None:
-    """Extract VK photo attachment string from a vkbottle message."""
+    """Extract VK photo attachment string from a message."""
     try:
         att_strings = message.get_attachment_strings() or []
     except Exception:
@@ -47,21 +46,6 @@ def extract_photo_attachment(message: Message) -> str | None:
         if att.startswith("photo"):
             logger.info(f"Extracted attachment string: {att}")
             return att
-
-    # Fallback: parse raw attachments list if the helper didn't work
-    attachments = getattr(message, "attachments", None) or []
-    for att in attachments:
-        att_type = getattr(att, "type", None)
-        if att_type == "photo":
-            photo = getattr(att, "photo", None)
-            if photo is not None:
-                owner_id = getattr(photo, "owner_id", None)
-                photo_id = getattr(photo, "id", None)
-                access_key = getattr(photo, "access_key", "") or ""
-                if owner_id and photo_id:
-                    res = f"photo{owner_id}_{photo_id}_{access_key}" if access_key else f"photo{owner_id}_{photo_id}"
-                    logger.info(f"Extracted attachment string: {res}")
-                    return res
 
     return None
 
@@ -78,10 +62,14 @@ async def handle_admin_flow(message: Message):
     # Кнопки панели управления (гибкое нормализованное сравнение)
     if "админ панель" in norm_text and not ("добавление" in norm_text or "шаг" in norm_text):
         await state_manager.set_state(vk_id, "admin_panel")
-        await message.answer("⚙️ Админ панель\n\nВыбери действие:", keyboard=get_admin_panel_keyboard())
+        await vk_client.send_message(
+            message.peer_id,
+            "⚙️ Админ панель\n\nВыбери действие:",
+            keyboard=get_admin_panel_keyboard(),
+        )
         return
 
-    if "статистика" in norm_text and not "моя" in norm_text:
+    if "статистика" in norm_text and "моя" not in norm_text:
         async with get_session() as session:
             stats_service = StatsService(session)
             stats = await stats_service.get_current_stats()
@@ -94,23 +82,25 @@ async def handle_admin_flow(message: Message):
             f"📝 Всего ответов: {stats['total_answers']}\n"
             f"📅 Обновлено: {stats['date']}\n"
         )
-        await message.answer(stats_text, keyboard=get_admin_panel_keyboard())
+        await vk_client.send_message(message.peer_id, stats_text, keyboard=get_admin_panel_keyboard())
         return
 
     if "очистить данные" in norm_text:
-        await message.answer(
+        await vk_client.send_message(
+            message.peer_id,
             "⚠️ Внимание!\n\n"
             "Это действие удалит всех пользователей, всю историю ответов и статистику.\n"
             "Задания НЕ будут удалены.\n\nПродолжить?",
-            keyboard=get_clear_data_confirmation_keyboard()
+            keyboard=get_clear_data_confirmation_keyboard(),
         )
         return
 
     if "добавить задание" in norm_text:
         await state_manager.set_state(vk_id, "waiting_for_task_number")
-        await message.answer(
+        await vk_client.send_message(
+            message.peer_id,
             "Выбери номер создаваемого задания на клавиатуре ниже (1-20):",
-            keyboard=get_task_number_selection_keyboard()
+            keyboard=get_task_number_selection_keyboard(),
         )
         return
 
@@ -121,17 +111,19 @@ async def handle_admin_flow(message: Message):
     # Шаг 1: Нажата кнопка номера задания (1-20)
     if current_state == "waiting_for_task_number":
         if not raw_text.isdigit() or not (1 <= int(raw_text) <= 20):
-            await message.answer(
+            await vk_client.send_message(
+                message.peer_id,
                 "Пожалуйста, выбери номер задания на клавиатуре ниже (1-20):",
-                keyboard=get_task_number_selection_keyboard()
+                keyboard=get_task_number_selection_keyboard(),
             )
             return
 
         task_num = int(raw_text)
         await state_manager.set_state(vk_id, "waiting_for_task_photo", task_number=task_num)
-        await message.answer(
+        await vk_client.send_message(
+            message.peer_id,
             f"📸 Выбрано задание №{task_num}.\nОтправь фото с условием задачи (можно сразу написать ответ в подписи к фото):",
-            keyboard=get_task_addition_keyboard()
+            keyboard=get_task_addition_keyboard(),
         )
         return
 
@@ -139,9 +131,10 @@ async def handle_admin_flow(message: Message):
     if current_state == "waiting_for_task_photo":
         photo_att = extract_photo_attachment(message)
         if not photo_att:
-            await message.answer(
+            await vk_client.send_message(
+                message.peer_id,
                 "⚠️ Пожалуйста, прикрепи фото к сообщению.",
-                keyboard=get_task_addition_keyboard()
+                keyboard=get_task_addition_keyboard(),
             )
             return
 
@@ -157,12 +150,17 @@ async def handle_admin_flow(message: Message):
                     await session.commit()
             except Exception as e:
                 logger.exception(f"Error saving task: {e}")
-                await message.answer("⚠️ Ошибка при сохранении задачи в БД. Попробуйте еще раз.", keyboard=get_task_addition_keyboard())
+                await vk_client.send_message(
+                    message.peer_id,
+                    "⚠️ Ошибка при сохранении задачи в БД. Попробуйте еще раз.",
+                    keyboard=get_task_addition_keyboard(),
+                )
                 return
 
             logger.info(f"Task #{task_num} successfully added: answer='{answer}', att='{photo_att}'")
             await state_manager.set_state(vk_id, "waiting_for_task_number")
-            await message.answer(
+            await vk_client.send_message(
+                message.peer_id,
                 f"✅ Задание №{task_num} с ответом «{answer}» успешно сохранено!\n\n"
                 "Выбери номер следующего задания на клавиатуре:",
                 keyboard=get_task_number_selection_keyboard(),
@@ -174,18 +172,23 @@ async def handle_admin_flow(message: Message):
             vk_id,
             "waiting_for_task_answer",
             task_number=task_num,
-            image_attachment=photo_att
+            image_attachment=photo_att,
         )
-        await message.answer(
+        await vk_client.send_message(
+            message.peer_id,
             f"✍️ Фото для задания №{task_num} успешно получено!\nТеперь введи правильный ответ текстом или числом:",
-            keyboard=get_task_addition_keyboard()
+            keyboard=get_task_addition_keyboard(),
         )
         return
 
     # Шаг 3: Ввод ответа отдельным сообщением
     if current_state == "waiting_for_task_answer":
         if not raw_text:
-            await message.answer("Введи ответ к заданию текстом:", keyboard=get_task_addition_keyboard())
+            await vk_client.send_message(
+                message.peer_id,
+                "Введи ответ к заданию текстом:",
+                keyboard=get_task_addition_keyboard(),
+            )
             return
 
         task_number = state_data.get("task_number")
@@ -199,12 +202,17 @@ async def handle_admin_flow(message: Message):
                 await session.commit()
         except Exception as e:
             logger.exception(f"Error saving task: {e}")
-            await message.answer("⚠️ Ошибка при сохранении задачи в БД. Попробуйте еще раз.", keyboard=get_task_addition_keyboard())
+            await vk_client.send_message(
+                message.peer_id,
+                "⚠️ Ошибка при сохранении задачи в БД. Попробуйте еще раз.",
+                keyboard=get_task_addition_keyboard(),
+            )
             return
 
         logger.info(f"Task #{task_number} successfully added: answer='{answer}', att='{image_att}'")
         await state_manager.set_state(vk_id, "waiting_for_task_number")
-        await message.answer(
+        await vk_client.send_message(
+            message.peer_id,
             f"✅ Задание №{task_number} с ответом «{answer}» успешно сохранено!\n\n"
             "Выбери номер следующего задания на клавиатуре:",
             keyboard=get_task_number_selection_keyboard(),

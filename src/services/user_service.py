@@ -1,5 +1,8 @@
 """
-User service for managing users with 0ms in-memory caching
+User service for managing users with 0ms in-memory caching.
+
+Cache stores plain data (dicts), NOT ORM instances. Caching ORM objects
+leads to DetachedInstanceError when the originating session is closed.
 """
 
 from typing import Optional
@@ -8,7 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import settings
 from src.database.models import User
 
-USER_CACHE: dict[int, User] = {}
+# Cached scalar fields per user (session-safe)
+USER_CACHE: dict[int, dict] = {}
+
+_CACHED_FIELDS = ("vk_id", "first_name", "grade", "solved_tasks", "is_admin")
+
+
+def _cache_from_user(user: User) -> dict:
+    return {field: getattr(user, field) for field in _CACHED_FIELDS}
 
 
 class UserService:
@@ -16,23 +26,26 @@ class UserService:
         self.session = session
 
     async def get_user_by_vk_id(self, vk_id: int) -> Optional[User]:
-        if vk_id in USER_CACHE:
-            return USER_CACHE[vk_id]
-
+        # Always load from DB to get a session-bound instance
         query = select(User).where(User.vk_id == vk_id)
         result = await self.session.execute(query)
         user = result.scalar_one_or_none()
         if user:
-            USER_CACHE[vk_id] = user
+            USER_CACHE[vk_id] = _cache_from_user(user)
         return user
 
     async def get_or_create_user(self, vk_id: int, first_name: str = "Ученик", grade: int = 11) -> User:
-        """Мгновенно возвращает или создает пользователя с кэшированием в памяти"""
-        if vk_id in USER_CACHE:
-            cached_user = USER_CACHE[vk_id]
-            if vk_id in settings.admin_ids_list and not cached_user.is_admin:
-                cached_user.is_admin = True
-            return cached_user
+        """Возвращает пользователя из БД (сессия-привязанный объект), используя кэш
+        только для быстрых проверок полей, например is_admin."""
+        cached = USER_CACHE.get(vk_id)
+
+        if cached is not None and vk_id in settings.admin_ids_list and not cached.get("is_admin"):
+            # Promote to admin in DB and cache without touching ORM objects
+            await self.session.execute(
+                update(User).where(User.vk_id == vk_id).values(is_admin=True)
+            )
+            await self.session.commit()
+            cached["is_admin"] = True
 
         query = select(User).where(User.vk_id == vk_id)
         result = await self.session.execute(query)
@@ -50,12 +63,11 @@ class UserService:
             self.session.add(user)
             await self.session.commit()
             await self.session.refresh(user)
-        else:
-            if vk_id in settings.admin_ids_list and not user.is_admin:
-                user.is_admin = True
-                await self.session.commit()
+        elif vk_id in settings.admin_ids_list and not user.is_admin:
+            user.is_admin = True
+            await self.session.commit()
 
-        USER_CACHE[vk_id] = user
+        USER_CACHE[vk_id] = _cache_from_user(user)
         return user
 
     async def create_user(self, vk_id: int, first_name: str, grade: int) -> User:
@@ -71,7 +83,7 @@ class UserService:
         await self.session.commit()
         await self.session.refresh(user)
 
-        USER_CACHE[vk_id] = user
+        USER_CACHE[vk_id] = _cache_from_user(user)
         return user
 
     async def add_solved_task(self, vk_id: int, task_id: int):
@@ -83,7 +95,10 @@ class UserService:
 
         new_solved_tasks = ",".join(solved_task_ids)
         user.solved_tasks = new_solved_tasks
-        USER_CACHE[vk_id] = user
+
+        # Update cache dict, not ORM instance
+        if vk_id in USER_CACHE:
+            USER_CACHE[vk_id]["solved_tasks"] = new_solved_tasks
 
         query = (
             update(User)
@@ -92,6 +107,9 @@ class UserService:
         )
         await self.session.execute(query)
         await self.session.commit()
+
+        # Refresh cached snapshot after commit
+        USER_CACHE[vk_id] = _cache_from_user(user)
 
     async def sync_admin_status(self, vk_id: int) -> bool:
         should_be_admin = vk_id in settings.admin_ids_list
@@ -104,6 +122,11 @@ class UserService:
         await self.session.commit()
 
         if vk_id in USER_CACHE:
-            USER_CACHE[vk_id].is_admin = should_be_admin
+            USER_CACHE[vk_id]["is_admin"] = should_be_admin
 
         return should_be_admin
+
+
+def invalidate_user_cache(vk_id: int):
+    """Удаляет пользователя из кэша (например, после удаления пользователя)."""
+    USER_CACHE.pop(vk_id, None)

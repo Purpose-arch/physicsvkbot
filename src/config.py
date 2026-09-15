@@ -19,3 +19,11 @@ class Settings(BaseSettings):
         return [int(x.strip()) for x in self.admin_ids.split(",") if x.strip().isdigit()]
 
 settings = Settings()
+
+
+def validate_settings() -> None:
+    """Fail fast with a clear message on invalid configuration."""
+    if not settings.bot_token:
+        raise RuntimeError(
+            "BOT_TOKEN is not set. Provide it in .env or environment variables."
+        )
