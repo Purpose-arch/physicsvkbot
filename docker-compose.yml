@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  vk_physics_bot:
+    build: .
+    container_name: vk_physics_bot
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
