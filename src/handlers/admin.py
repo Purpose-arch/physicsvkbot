@@ -80,7 +80,7 @@ async def handle_admin_flow(message: Message):
             f"🎯 Средняя точность: {stats['avg_accuracy']:.1f}%\n"
             f"✅ Верных ответов: {stats['correct_answers']}\n"
             f"📝 Всего ответов: {stats['total_answers']}\n"
-            f"📅 Обновлено: {stats['date']}\n"
+            f"📅 Дата: {stats['date']}\n"
         )
         await vk_client.send_message(message.peer_id, stats_text, keyboard=get_admin_panel_keyboard())
         return
