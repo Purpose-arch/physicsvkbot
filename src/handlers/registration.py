@@ -1,5 +1,5 @@
 """
-Registration handler for new VK users
+Обработчик регистрации новых пользователей VK
 """
 
 import logging

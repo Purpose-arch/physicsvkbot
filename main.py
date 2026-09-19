@@ -58,7 +58,7 @@ def clean_input(text: str) -> str:
 
 
 async def process_update(message: Message):
-    """Route a single incoming message through the handler chain."""
+    """Маршрутизирует одно входящее сообщение по цепочке обработчиков."""
     try:
         vk_id = message.from_id
         raw_text = message.text.strip() if message.text else ""
@@ -161,12 +161,12 @@ async def health_handler(request):
 
 
 async def dispatch_updates(data: dict):
-    """Iterate Long Poll updates and process message events concurrently."""
+    """Итерирует обновления Long Poll и параллельно обрабатывает события сообщений."""
     for update in data.get("updates", []):
         if update.get("type") != "message_new":
             continue
         obj = update.get("object", {})
-        # API 5.103+: message nested inside object; older versions: flat
+        # API 5.103+: message вложено в object; в старых версиях — плоская структура
         msg_raw = obj.get("message", obj)
         if not msg_raw.get("from_id"):
             continue

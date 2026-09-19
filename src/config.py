@@ -22,7 +22,7 @@ settings = Settings()
 
 
 def validate_settings() -> None:
-    """Fail fast with a clear message on invalid configuration."""
+    """Быстро падает с понятным сообщением при некорректной конфигурации."""
     if not settings.bot_token:
         raise RuntimeError(
             "BOT_TOKEN is not set. Provide it in .env or environment variables."

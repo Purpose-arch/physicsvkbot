@@ -1,5 +1,5 @@
 """
-Start command handler
+Обработчик команды «Начать»
 """
 
 import logging

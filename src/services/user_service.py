@@ -1,8 +1,8 @@
 """
-User service for managing users with 0ms in-memory caching.
+Сервис пользователей с кэшированием в памяти (0 мс на чтение из кэша).
 
-Cache stores plain data (dicts), NOT ORM instances. Caching ORM objects
-leads to DetachedInstanceError when the originating session is closed.
+В кэше хранятся простые данные (dict), а НЕ ORM-объекты. Кэширование ORM-объектов
+приводит к DetachedInstanceError после закрытия исходной сессии.
 """
 
 from typing import Optional
@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import settings
 from src.database.models import User
 
-# Cached scalar fields per user (session-safe)
+# Кэшируемые скалярные поля пользователя (безопасно вне сессии)
 USER_CACHE: dict[int, dict] = {}
 
 _CACHED_FIELDS = ("vk_id", "first_name", "grade", "solved_tasks", "is_admin")
@@ -26,7 +26,7 @@ class UserService:
         self.session = session
 
     async def get_user_by_vk_id(self, vk_id: int) -> Optional[User]:
-        # Always load from DB to get a session-bound instance
+        # Всегда загружаем из БД, чтобы получить объект, привязанный к сессии
         query = select(User).where(User.vk_id == vk_id)
         result = await self.session.execute(query)
         user = result.scalar_one_or_none()
@@ -40,7 +40,7 @@ class UserService:
         cached = USER_CACHE.get(vk_id)
 
         if cached is not None and vk_id in settings.admin_ids_list and not cached.get("is_admin"):
-            # Promote to admin in DB and cache without touching ORM objects
+            # Повышаем до админа в БД и кэше, не трогая ORM-объекты
             await self.session.execute(
                 update(User).where(User.vk_id == vk_id).values(is_admin=True)
             )
@@ -96,7 +96,7 @@ class UserService:
         new_solved_tasks = ",".join(solved_task_ids)
         user.solved_tasks = new_solved_tasks
 
-        # Update cache dict, not ORM instance
+        # Обновляем dict в кэше, а не ORM-объект
         if vk_id in USER_CACHE:
             USER_CACHE[vk_id]["solved_tasks"] = new_solved_tasks
 
@@ -108,7 +108,7 @@ class UserService:
         await self.session.execute(query)
         await self.session.commit()
 
-        # Refresh cached snapshot after commit
+        # Обновляем кэшированный снимок после коммита
         USER_CACHE[vk_id] = _cache_from_user(user)
 
     async def sync_admin_status(self, vk_id: int) -> bool:

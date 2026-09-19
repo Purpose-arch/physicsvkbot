@@ -1,5 +1,5 @@
 """
-Practice handlers for solving tasks and checking statistics
+Обработчики практики: решение заданий и просмотр статистики
 """
 
 import re
@@ -23,7 +23,7 @@ async def send_vk_message(
     keyboard: str | None = None,
     attachment: str | None = None,
 ):
-    """Safely send a VK message; the client retries without attachment if VK rejects it."""
+    """Безопасно отправляет сообщение VK; клиент повторит без вложения, если VK его отклонит."""
     peer_id = getattr(message, "peer_id", getattr(message, "from_id", None))
     await vk_client.send_message(
         peer_id=peer_id,
@@ -39,7 +39,7 @@ async def send_next_task(
     task_mode: str,
     selected_number: int | None = None,
 ):
-    """Fetch and send task to user."""
+    """Получает и отправляет задание пользователю."""
     async with get_session() as session:
         user_service = UserService(session)
         task_service = TaskService(session)
@@ -99,7 +99,7 @@ async def send_next_task(
 
 
 async def handle_practice_flow(message: Message):
-    """Main practice handler for task selection and answering."""
+    """Основной обработчик практики: выбор задания и проверка ответов."""
     vk_id = message.from_id
     raw_text = message.text.strip() if message.text else ""
     norm_text = raw_text.replace("\ufe0f", "").replace("\u200b", "").strip().lower()
@@ -177,7 +177,7 @@ async def handle_practice_flow(message: Message):
 
 
 async def handle_my_stats(message: Message):
-    """Show personal user stats with 100% crash protection."""
+    """Показывает личную статистику пользователя с полной защитой от сбоев."""
     vk_id = message.from_id
     try:
         async with get_session() as session:

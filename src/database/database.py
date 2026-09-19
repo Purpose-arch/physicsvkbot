@@ -1,5 +1,5 @@
 """
-Database connection and session management for Physics EGE VK Bot
+Подключение к базе данных и управление сессиями
 """
 
 import logging
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Асинхронный движок с прогревом пула и без кэширования подготовленных запросов
 def _build_engine_kwargs() -> dict:
-    """Engine kwargs depend on the underlying driver."""
+    """Параметры движка зависят от используемого драйвера."""
     kwargs: dict = {
         "echo": False,
         "future": True,
@@ -39,7 +39,7 @@ AsyncSessionLocal = async_sessionmaker(
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """
-    Get database session with automatic rollback on error to prevent deadlocks
+    Возвращает сессию БД с автоматическим rollback при ошибке для предотвращения блокировок
     """
     async with AsyncSessionLocal() as session:
         try:
@@ -53,7 +53,7 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 
 async def create_tables():
     """
-    Create all tables in the database and pre-warm DB connections
+    Создаёт все таблицы в базе данных и прогревает соединения с БД
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

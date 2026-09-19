@@ -1,5 +1,5 @@
 """
-Task service for managing physics tasks with 100% fail-safe query handling
+Сервис заданий: управление задачами по физике с полностью отказоустойчивыми запросами
 """
 
 import logging
@@ -16,13 +16,13 @@ class TaskService:
         self.session = session
 
     def _parse_solved_ids(self, solved_tasks: str) -> set[int]:
-        """Parse solved_tasks string into a set of integer task IDs"""
+        """Разбирает строку solved_tasks в множество целочисленных ID заданий"""
         if not solved_tasks or not solved_tasks.strip():
             return set()
         return {int(x.strip()) for x in solved_tasks.split(",") if x.strip().isdigit()}
 
     async def get_random_task(self, solved_tasks: str) -> Optional[Task]:
-        """Get a random task, excluding already solved tasks."""
+        """Возвращает случайное задание, исключая уже решённые."""
         try:
             solved_ids = self._parse_solved_ids(solved_tasks)
             query = select(Task)
@@ -37,7 +37,7 @@ class TaskService:
             return None
 
     async def get_task_by_number(self, task_number: int, solved_tasks: str) -> Optional[Task]:
-        """Get a random task by number, excluding solved tasks."""
+        """Возвращает случайное задание по номеру, исключая решённые."""
         try:
             solved_ids = self._parse_solved_ids(solved_tasks)
             query = select(Task).where(Task.task_number == task_number)
@@ -52,7 +52,7 @@ class TaskService:
             return None
 
     async def get_task_number_stats(self, task_number: int, vk_id: int) -> dict:
-        """Get statistics for a specific task number for a user."""
+        """Возвращает статистику по конкретному номеру задания для пользователя."""
         try:
             total_query = select(func.count()).where(Task.task_number == task_number)
             total_result = await self.session.execute(total_query)
@@ -76,7 +76,7 @@ class TaskService:
             return {"total": 0, "solved": 0}
 
     async def add_answer_history(self, vk_id: int, task_id: int, is_correct: bool):
-        """Add answer to history safely."""
+        """Безопасно добавляет ответ в историю."""
         try:
             history = AnswerHistory(user_id=vk_id, task_id=task_id, is_correct=is_correct)
             self.session.add(history)
@@ -87,7 +87,7 @@ class TaskService:
 
     async def get_user_stats(self, vk_id: int) -> dict:
         """
-        Get detailed stats for a user with fail-safe breakdown protection.
+        Возвращает детальную статистику пользователя с отказоустойчивой разбивкой по номерам.
         """
         try:
             query = (

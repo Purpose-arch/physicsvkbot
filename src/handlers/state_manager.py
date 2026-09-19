@@ -1,5 +1,5 @@
 """
-Persistent FSM State Manager backed by PostgreSQL and in-memory cache
+Персистентный менеджер FSM-состояний на основе PostgreSQL и кэша в памяти
 """
 
 import json
@@ -19,7 +19,7 @@ class FSMStateManager:
         self._cache: dict[int, dict] = {}
 
     def _cache_put(self, vk_id: int, data: dict):
-        """Simple size-bounded cache to prevent unbounded memory growth."""
+        """Простой кэш с ограничением размера, чтобы память не росла бесконечно."""
         if len(self._cache) >= CACHE_MAX_SIZE and vk_id not in self._cache:
             # Удаляем произвольную (первую) запись
             self._cache.pop(next(iter(self._cache)))

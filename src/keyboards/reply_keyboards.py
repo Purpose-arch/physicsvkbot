@@ -1,5 +1,5 @@
 """
-Reply keyboards for the Physics EGE VK Bot
+Reply-клавиатуры
 """
 
 import json
@@ -59,7 +59,7 @@ class VKKeyboard:
 
 def get_main_menu_keyboard(is_admin: bool = False) -> str:
     """
-    Generate main menu keyboard with task buttons 1-20
+    Генерирует главное меню с кнопками заданий 1-20
     """
     kb = VKKeyboard(one_time=False)
 
@@ -82,7 +82,7 @@ def get_main_menu_keyboard(is_admin: bool = False) -> str:
 
 def get_admin_panel_keyboard() -> str:
     """
-    Generate admin panel keyboard with admin-specific actions.
+    Генерирует клавиатуру админ-панели с админскими действиями.
     """
     kb = VKKeyboard(one_time=False)
     kb.add("➕ Добавить задание", color=ButtonColor.POSITIVE)
@@ -111,14 +111,14 @@ def get_task_number_selection_keyboard() -> str:
 
 
 def get_task_keyboard() -> str:
-    """Keyboard shown while user is solving a task — only exit button visible"""
+    """Клавиатура во время решения задания — видна только кнопка выхода"""
     kb = VKKeyboard(one_time=False)
     kb.add("⬅️ Главное меню", color=ButtonColor.SECONDARY)
     return kb.get_json()
 
 
 def get_task_addition_keyboard() -> str:
-    """Keyboard shown during task addition — exit button visible"""
+    """Клавиатура при добавлении задания — видна только кнопка выхода"""
     kb = VKKeyboard(one_time=False)
     kb.add("⬅️ Админ панель", color=ButtonColor.SECONDARY)
     return kb.get_json()

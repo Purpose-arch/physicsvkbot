@@ -1,5 +1,5 @@
 """
-Inline keyboards for the Physics EGE VK Bot
+Инлайн-клавиатуры
 """
 
 import json
@@ -58,7 +58,7 @@ class VKKeyboard:
 
 
 def get_task_action_keyboard() -> str:
-    """Generate inline keyboard for task actions"""
+    """Генерирует инлайн-клавиатуру действий с заданием"""
     kb = VKKeyboard(inline=True)
     kb.add("⏭️ Следующее задание", color=ButtonColor.PRIMARY, payload={"action": "next_task"})
     kb.row()
@@ -67,7 +67,7 @@ def get_task_action_keyboard() -> str:
 
 
 def get_clear_data_confirmation_keyboard() -> str:
-    """Generate confirmation keyboard for clearing all data except tasks"""
+    """Генерирует клавиатуру подтверждения очистки всех данных, кроме заданий"""
     kb = VKKeyboard(inline=True)
     kb.add("✅ Да, очистить", color=ButtonColor.NEGATIVE, payload={"action": "confirm_clear_data"})
     kb.add("❌ Отмена", color=ButtonColor.SECONDARY, payload={"action": "cancel_clear_data"})

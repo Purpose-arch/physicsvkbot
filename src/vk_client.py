@@ -1,8 +1,8 @@
 """
-Reliable VK Long Poll client built directly on aiohttp.
+Надёжный клиент VK Long Poll, построенный напрямую на aiohttp.
 
-Replaces vkbottle: no heavy dependencies, explicit retry logic,
-stable API surface. Uses the same BOT_TOKEN from .env.
+Замена vkbottle: без тяжёлых зависимостей, с явной логикой повторов
+и стабильным API. Использует тот же BOT_TOKEN из .env.
 """
 
 import asyncio
@@ -22,7 +22,7 @@ API_URL = "https://api.vk.com/method/"
 
 
 class VKAPIError(Exception):
-    """VK API error with numeric code (mirrors vkbottle's VKAPIError)."""
+    """Ошибка VK API с числовым кодом (аналог VKAPIError из vkbottle)."""
 
     def __init__(self, code: int, message: str = ""):
         self.code = code
@@ -32,7 +32,7 @@ class VKAPIError(Exception):
 
 @dataclass
 class Message:
-    """Lightweight message context passed to handlers."""
+    """Лёгкий контекст сообщения, передаваемый обработчикам."""
 
     from_id: int
     peer_id: int
@@ -51,7 +51,7 @@ class Message:
         )
 
     def get_attachment_strings(self) -> list[str]:
-        """Return attachment strings like 'photo123_456' from raw update."""
+        """Возвращает строки вложений вида 'photo123_456' из сырого обновления."""
         result: list[str] = []
         attachments = self._raw.get("attachments") or []
         if isinstance(attachments, dict):
@@ -76,7 +76,7 @@ class Message:
 
 
 class VKClient:
-    """VK API wrapper + Long Poll listener."""
+    """Обёртка над VK API + слушатель Long Poll."""
 
     def __init__(self, token: str):
         self.token = token
@@ -93,7 +93,7 @@ class VKClient:
         return self._session
 
     async def call_method(self, method: str, **params) -> dict:
-        """Call a VK API method with automatic retry/backoff."""
+        """Вызывает метод VK API с автоматическими повторами и backoff."""
         params.setdefault("access_token", self.token)
         params.setdefault("v", API_VERSION)
         session = await self._get_session()
@@ -114,7 +114,7 @@ class VKClient:
             if "error" in data:
                 err = data["error"]
                 code = err.get("error_code", 0)
-                # 6 (too many requests) and 10 (internal server error) — retryable
+                # 6 (слишком много запросов) и 10 (внутренняя ошибка сервера) — можно повторить
                 if code in (6, 9, 10):
                     await asyncio.sleep(backoff + random.random())
                     backoff = min(backoff * 2, 30)
@@ -131,7 +131,7 @@ class VKClient:
         keyboard: str | None = None,
         attachment: str | None = None,
     ) -> None:
-        """Send a message; retries once without attachment if rejected."""
+        """Отправляет сообщение; при отклонении повторяет один раз без вложения."""
         params = {"peer_id": peer_id, "message": text, "random_id": random.randint(0, 2**31 - 1)}
         if keyboard:
             params["keyboard"] = keyboard
@@ -142,8 +142,8 @@ class VKClient:
         except VKAPIError as e:
             if not attachment:
                 raise
-            # Message was not delivered; most likely the attachment is stale
-            # or rejected by VK. Retry once without it as a fallback.
+            # Сообщение не доставлено: скорее всего вложение устарело
+            # или отклонено VK. Повторяем один раз без него как fallback.
             logger.warning(f"VK rejected attachment '{attachment}' ({e}); retrying without it.")
             await self.call_method(
                 "messages.send",
@@ -167,7 +167,7 @@ class VKClient:
         return self._group_id
 
     async def wait_event(self) -> dict | None:
-        """Wait for the next Long Poll event. Returns raw update or None on failure."""
+        """Ожидает следующее событие Long Poll. Возвращает сырой апдейт или None при сбое."""
         session = await self._get_session()
         try:
             if not (self._lp_server and self._lp_key and self._lp_ts):
@@ -184,12 +184,12 @@ class VKClient:
 
         failed = data.get("failed")
         if failed:
-            if failed in (1, 3):  # history lost / ts expired — key is still valid for 1, 2
+            if failed in (1, 3):  # потеряна история / истёк ts — ключ ещё действителен для 1, 2
                 self._lp_ts = data.get("ts", self._lp_ts)
                 if failed == 3:
                     self._lp_server = None
             elif failed == 2:
-                self._lp_server = None  # key expired
+                self._lp_server = None  # ключ истёк
             await asyncio.sleep(1)
             return None
 

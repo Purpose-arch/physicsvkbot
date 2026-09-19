@@ -1,4 +1,4 @@
-"""Admin handlers for the VK Physics EGE Bot"""
+"""Обработчики админ-функций"""
 
 import logging
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 async def is_admin_user(message: Message) -> bool:
-    """Check if the sender is an admin by ADMIN_IDS list or DB status."""
+    """Проверяет, является ли отправитель админом: по списку ADMIN_IDS или статусу в БД."""
     vk_id = message.from_id
     if vk_id in settings.admin_ids_list:
         return True
@@ -36,7 +36,7 @@ async def is_admin_user(message: Message) -> bool:
 
 
 def extract_photo_attachment(message: Message) -> str | None:
-    """Extract VK photo attachment string from a message."""
+    """Извлекает строку вложения-фото VK из сообщения."""
     try:
         att_strings = message.get_attachment_strings() or []
     except Exception:
@@ -51,7 +51,7 @@ def extract_photo_attachment(message: Message) -> str | None:
 
 
 async def handle_admin_flow(message: Message):
-    """Main admin handler managing buttons and FSM states with flexible matching."""
+    """Основной обработчик админ-панели: кнопки и FSM-состояния с гибким сопоставлением."""
     vk_id = message.from_id
     raw_text = message.text.strip() if message.text else ""
     norm_text = raw_text.replace("\ufe0f", "").replace("\u200b", "").strip().lower()

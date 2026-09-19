@@ -1,5 +1,5 @@
 """
-Database models for Physics EGE VK Bot
+Модели базы данных
 """
 
 from sqlalchemy import (
@@ -19,7 +19,7 @@ Base = declarative_base()
 
 
 class User(Base):
-    """User model for bot users"""
+    """Модель пользователя бота"""
 
     __tablename__ = "users"
 
@@ -37,7 +37,7 @@ class User(Base):
 
 
 class Task(Base):
-    """Task model for physics problems"""
+    """Модель задания по физике"""
 
     __tablename__ = "tasks"
 
@@ -52,7 +52,7 @@ class Task(Base):
 
 
 class AnswerHistory(Base):
-    """Answer history model for detailed analytics"""
+    """Модель истории ответов для детальной аналитики"""
 
     __tablename__ = "answer_history"
 
@@ -74,7 +74,7 @@ class AnswerHistory(Base):
 
 
 class UserStateModel(Base):
-    """Persistent FSM state storage in DB to prevent losing state on container restarts"""
+    """Хранилище FSM-состояний в БД, чтобы не терять их при перезапуске контейнера"""
 
     __tablename__ = "user_fsm_states"
 
