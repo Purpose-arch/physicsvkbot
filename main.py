@@ -28,6 +28,28 @@ logger = logging.getLogger(__name__)
 ERROR_NOTIFY_COOLDOWN = 300  # не чаще 1 сообщения об ошибке в 5 минут на пользователя
 _user_error_notify_ts: dict[int, float] = {}
 
+# --- Дедупликация входящих сообщений (защита от двойной обработки кнопок) ---
+DEDUP_TTL = 300  # секунд хранения ключей обработанных сообщений
+_processed_messages: dict[tuple[int, int], float] = {}
+
+
+def _is_duplicate(message: Message) -> bool:
+    """True, если такое сообщение уже обрабатывалось недавно."""
+    msg_id = message._raw.get("id") or message._raw.get("conversation_message_id") or 0
+    if not msg_id:
+        return False
+    key = (message.from_id, msg_id)
+    now = time.monotonic()
+    if key in _processed_messages:
+        return True
+    _processed_messages[key] = now
+    # Периодическая очистка устаревших ключей
+    if len(_processed_messages) > 10000:
+        cutoff = now - DEDUP_TTL
+        for k in [k for k, ts in _processed_messages.items() if ts < cutoff]:
+            _processed_messages.pop(k, None)
+    return False
+
 # Ключевые слова ошибок VK API, связанных с токеном (не имеет смысла ретраить часто)
 TOKEN_ERROR_RE = re.compile(
     r"invalid access token|access token|user authorization failed|token[ _-]?invalid|error code:? ?(5|28)\b",
@@ -60,6 +82,11 @@ def clean_input(text: str) -> str:
 async def process_update(message: Message):
     """Маршрутизирует одно входящее сообщение по цепочке обработчиков."""
     try:
+        # Отсекаем дубликаты (VK может доставить одно сообщение дважды)
+        if _is_duplicate(message):
+            logger.info(f"Duplicate message from VK ID {message.from_id} ignored")
+            return
+
         vk_id = message.from_id
         raw_text = message.text.strip() if message.text else ""
         norm_text = clean_input(raw_text)

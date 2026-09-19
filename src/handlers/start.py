@@ -3,6 +3,7 @@
 """
 
 import logging
+from src.config import settings
 from src.database.database import get_session
 from src.handlers.state_manager import state_manager
 from src.keyboards.reply_keyboards import get_main_menu_keyboard
@@ -19,8 +20,23 @@ async def handle_start(message: Message):
 
         async with get_session() as session:
             user_service = UserService(session)
-            user = await user_service.get_or_create_user(vk_id)
-            is_admin = await user_service.sync_admin_status(vk_id)
+            # Ищем пользователя, НЕ создавая его автоматически,
+            # чтобы новым юзерам предлагалась регистрация.
+            user = await user_service.get_user_by_vk_id(vk_id)
+            is_admin = vk_id in settings.admin_ids_list
+
+            if user is None or user.grade not in (10, 11) or not user.first_name or user.first_name == "Ученик":
+                # Новый или некорректно зарегистрированный пользователь — запускаем регистрацию
+                await state_manager.set_state(vk_id, "waiting_for_first_name")
+                await vk_client.send_message(
+                    message.peer_id,
+                    "Привет! 👋 Добро пожаловать в бота по физике!\n\n"
+                    "Давай познакомимся: как тебя зовут?",
+                )
+                return
+
+            # Синхронизируем админ-статус только для существующих пользователей
+            is_admin = is_admin or await user_service.sync_admin_status(vk_id)
             keyboard = get_main_menu_keyboard(is_admin)
 
             await vk_client.send_message(
