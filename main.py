@@ -155,6 +155,12 @@ async def process_update(message: Message):
             await handle_my_stats(message)
             return
 
+        # Кнопка «📊 Статистика» из админ-панели: передаём в админ-обработчик,
+        # который сам проверит права и покажет статистику бота.
+        if "статистика" in norm_text and "моя" not in norm_text:
+            await handle_admin_flow(message)
+            return
+
         # 4. Проверка состояний FSM
         # Регистрация
         if current_state in ("waiting_for_first_name", "waiting_for_grade"):
