@@ -162,7 +162,9 @@ async def process_update(message: Message):
             return
 
         # Админ состояния
-        if current_state in ("waiting_for_task_number", "waiting_for_task_photo", "waiting_for_task_answer") or ("добавить задание" in norm_text or "очистить данные" in norm_text):
+        if current_state in ("waiting_for_task_number", "waiting_for_task_photo", "waiting_for_task_answer", "waiting_for_bulk_tasks") or (
+            "добавить задание" in norm_text or "массовое добавление" in norm_text or "очистить данные" in norm_text
+        ):
             await handle_admin_flow(message)
             return
 
