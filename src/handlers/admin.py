@@ -9,10 +9,12 @@ from src.handlers.state_manager import state_manager
 from src.keyboards.inline_keyboards import get_clear_data_confirmation_keyboard
 from src.keyboards.reply_keyboards import (
     get_admin_panel_keyboard,
+    get_bulk_addition_keyboard,
     get_task_addition_keyboard,
     get_task_number_selection_keyboard,
 )
 from src.services.stats_service import StatsService
+from src.services.task_service import TaskService
 from src.services.user_service import UserService
 from src.vk_client import Message, vk_client
 
@@ -33,6 +35,22 @@ async def is_admin_user(message: Message) -> bool:
 
     await vk_client.send_message(message.peer_id, "У тебя нет доступа к этой функции.")
     return False
+
+
+def parse_bulk_caption(raw_text: str) -> list[tuple[int, str]]:
+    """Парсит подпись массового добавления: строки 'номер: ответ'. Деление по первому ':'."""
+    entries: list[tuple[int, str]] = []
+    for line in raw_text.splitlines():
+        line = line.strip()
+        if not line or ":" not in line:
+            continue
+        number_part, answer_part = line.split(":", 1)
+        number_part = number_part.strip()
+        answer_part = answer_part.strip()
+        if not number_part.isdigit():
+            continue
+        entries.append((int(number_part), answer_part))
+    return entries
 
 
 def extract_photo_attachment(message: Message) -> str | None:
@@ -101,6 +119,23 @@ async def handle_admin_flow(message: Message):
             message.peer_id,
             "Выбери номер создаваемого задания на клавиатуре ниже (1-20):",
             keyboard=get_task_number_selection_keyboard(),
+        )
+        return
+
+    if "массовое добавление" in norm_text:
+        await state_manager.set_state(vk_id, "waiting_for_bulk_tasks")
+        await vk_client.send_message(
+            message.peer_id,
+            "📥 Массовое добавление заданий\n\n"
+            "Отправь ОДНО сообщение с фото (до 10 вложений) и подписью в формате:\n"
+            "1: ответ\n"
+            "5: ответ\n"
+            "12: ответ\n\n"
+            "Номер — номер задания, после двоеточия — правильный ответ.\n"
+            "Фото сопоставляются со строками ПО ПОРЯДКУ: первое фото → первая строка и т.д.\n"
+            "Можно добавлять несколько вариантов одного номера (например, два №20).\n"
+            "Для выхода нажми «⬅️ Админ панель».",
+            keyboard=get_bulk_addition_keyboard(),
         )
         return
 
@@ -179,6 +214,79 @@ async def handle_admin_flow(message: Message):
             f"✍️ Фото для задания №{task_num} успешно получено!\nТеперь введи правильный ответ текстом или числом:",
             keyboard=get_task_addition_keyboard(),
         )
+        return
+
+    # Массовое добавление заданий
+    if current_state == "waiting_for_bulk_tasks":
+        # Выход из режима
+        if "админ панель" in norm_text:
+            await state_manager.set_state(vk_id, "admin_panel")
+            await vk_client.send_message(
+                message.peer_id,
+                "⚙️ Админ панель\n\nВыбери действие:",
+                keyboard=get_admin_panel_keyboard(),
+            )
+            return
+
+        photo_attachments = [
+            att for att in (message.get_attachment_strings() or []) if att.startswith("photo")
+        ]
+        entries = parse_bulk_caption(raw_text)
+
+        if not photo_attachments or not entries:
+            await vk_client.send_message(
+                message.peer_id,
+                "⚠️ Нужны фото и подпись с номерами заданий.\n\n"
+                "Формат подписи:\n1: ответ\n5: ответ\n\n"
+                "Фото сопоставляются со строками по порядку.",
+                keyboard=get_bulk_addition_keyboard(),
+            )
+            return
+
+        # Валидация и сопоставление фото со строками по порядку
+        valid_tasks: list[Task] = []
+        errors: list[str] = []
+        for idx, (task_num, answer) in enumerate(entries):
+            if not (1 <= task_num <= 20):
+                errors.append(f"«{task_num}: {answer}» — номер должен быть 1-20")
+                continue
+            if not answer:
+                errors.append(f"«{task_num}:» — пустой ответ")
+                continue
+            if idx >= len(photo_attachments):
+                errors.append(f"«{task_num}: {answer}» — не хватило фото")
+                continue
+            valid_tasks.append(
+                Task(task_number=task_num, answer=answer, image_attachment=photo_attachments[idx])
+            )
+
+        if not valid_tasks:
+            await vk_client.send_message(
+                message.peer_id,
+                "❌ Ни одна строка не прошла валидацию:\n" + "\n".join(errors),
+                keyboard=get_bulk_addition_keyboard(),
+            )
+            return
+
+        try:
+            async with get_session() as session:
+                task_service = TaskService(session)
+                added = await task_service.add_tasks_batch(valid_tasks)
+        except Exception:
+            logger.exception("Error saving tasks batch")
+            await vk_client.send_message(
+                message.peer_id,
+                "⚠️ Ошибка при сохранении заданий в БД. Попробуй еще раз.",
+                keyboard=get_bulk_addition_keyboard(),
+            )
+            return
+
+        report = f"✅ Добавлено заданий: {added}\n" + ", ".join(
+            f"№{t.task_number}" for t in valid_tasks
+        )
+        if errors:
+            report += "\n\n❌ Ошибки:\n" + "\n".join(errors)
+        await vk_client.send_message(message.peer_id, report, keyboard=get_bulk_addition_keyboard())
         return
 
     # Шаг 3: Ввод ответа отдельным сообщением

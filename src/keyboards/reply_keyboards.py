@@ -86,6 +86,8 @@ def get_admin_panel_keyboard() -> str:
     """
     kb = VKKeyboard(one_time=False)
     kb.add("➕ Добавить задание", color=ButtonColor.POSITIVE)
+    kb.add("📥 Массовое добавление", color=ButtonColor.POSITIVE)
+    kb.row()
     kb.add("🗑️ Очистить данные", color=ButtonColor.NEGATIVE)
     kb.row()
     kb.add("⬅️ Главное меню", color=ButtonColor.PRIMARY)
@@ -107,6 +109,13 @@ def get_task_number_selection_keyboard() -> str:
         if i % 5 == 0 and i != 20:
             kb.row()
 
+    return kb.get_json()
+
+
+def get_bulk_addition_keyboard() -> str:
+    """Клавиатура в режиме массового добавления заданий"""
+    kb = VKKeyboard(one_time=False)
+    kb.add("⬅️ Админ панель", color=ButtonColor.SECONDARY)
     return kb.get_json()
 
 

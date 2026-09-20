@@ -75,6 +75,17 @@ class TaskService:
             logger.error(f"Error getting task stats for number {task_number}: {e}")
             return {"total": 0, "solved": 0}
 
+    async def add_tasks_batch(self, tasks: List[Task]) -> int:
+        """Сохраняет список заданий одной транзакцией (быстрая массовая загрузка)."""
+        try:
+            self.session.add_all(tasks)
+            await self.session.commit()
+            return len(tasks)
+        except Exception as e:
+            logger.error(f"Error adding tasks batch: {e}")
+            await self.session.rollback()
+            raise
+
     async def add_answer_history(self, vk_id: int, task_id: int, is_correct: bool):
         """Безопасно добавляет ответ в историю."""
         try:
