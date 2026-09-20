@@ -13,8 +13,9 @@ from src.handlers.registration import process_registration
 from src.handlers.practice import handle_practice_flow, handle_my_stats, send_next_task
 from src.handlers.admin import handle_admin_flow, is_admin_user
 from src.keyboards.reply_keyboards import get_main_menu_keyboard, get_admin_panel_keyboard
-from src.services.user_service import UserService
+from src.services.user_service import UserService, invalidate_user_cache
 from src.services.stats_service import StatsService
+from src.utils import clean_input
 from src.vk_client import Message, VKAPIError, vk_client
 
 logging.basicConfig(
@@ -65,18 +66,32 @@ async def notify_user_error(message: Message, user_id: int):
         logger.warning(f"Suppressed duplicate error notification for user {user_id} (cooldown)")
         return
     _user_error_notify_ts[user_id] = now
+    # Периодическая очистка от устаревших записей (иначе словарь растёт вечно)
+    if len(_user_error_notify_ts) > 10000:
+        for uid in [uid for uid, ts in _user_error_notify_ts.items() if now - ts >= ERROR_NOTIFY_COOLDOWN]:
+            _user_error_notify_ts.pop(uid, None)
     try:
         await vk_client.send_message(message.peer_id, "⚠️ Произошла ошибка при обработке сообщения. Попробуйте ещё раз.")
     except Exception as e:
         logger.error(f"Failed to send error notification to user {user_id}: {e}")
 
 
-def clean_input(text: str) -> str:
-    """Удаляет скрытые юникод-символы разных мобильных ОС для 100% совпадения кнопок."""
-    if not text:
-        return ""
-    clean = text.replace("\ufe0f", "").replace("\u200b", "").strip().lower()
-    return " ".join(clean.split())
+# Per-user блокировка: не даём параллельным задачам одного пользователя
+# обрабатывать сообщения одновременно (защита от двойной записи ответов и
+# от гонок на FSM-состоянии при быстрых повторных отправках).
+_user_locks: dict[int, asyncio.Lock] = {}
+_USER_LOCKS_MAX = 10_000
+
+
+def _get_user_lock(vk_id: int) -> asyncio.Lock:
+    lock = _user_locks.get(vk_id)
+    if lock is None:
+        if len(_user_locks) >= _USER_LOCKS_MAX:
+            # Чистим незанятые локи, чтобы словарь не рос бесконечно
+            for uid in [uid for uid, l in _user_locks.items() if not l.locked()]:
+                _user_locks.pop(uid, None)
+        lock = _user_locks.setdefault(vk_id, asyncio.Lock())
+    return lock
 
 
 async def process_update(message: Message):
@@ -87,6 +102,28 @@ async def process_update(message: Message):
             logger.info(f"Duplicate message from VK ID {message.from_id} ignored")
             return
 
+        # Сериализуем обработку сообщений одного пользователя:
+        # параллельные апдейты от одного человека ждут своей очереди,
+        # поэтому состояние FSM и история ответов не страдают от гонок.
+        async with _get_user_lock(message.from_id):
+            await _process_update_inner(message)
+    except VKAPIError as e:
+        if e.code == 912:
+            # Сообщество не разрешает боту писать в этот чат.
+            logger.warning(
+                f"VKAPIError 912 for user {message.from_id}: bot is not allowed to "
+                "message this chat. Enable 'Возможности ботов' in the VK community settings."
+            )
+        else:
+            logger.error(f"VK API error {e.code} for user {message.from_id}: {e}")
+    except Exception as e:
+        logger.exception(f"Error in process_update for user {message.from_id}: {e}")
+        await notify_user_error(message, message.from_id)
+
+
+async def _process_update_inner(message: Message):
+    """Тело маршрутизации, выполняемое под per-user локом."""
+    try:
         vk_id = message.from_id
         raw_text = message.text.strip() if message.text else ""
         norm_text = clean_input(raw_text)
@@ -126,6 +163,11 @@ async def process_update(message: Message):
                 async with get_session() as session:
                     stats_service = StatsService(session)
                     counts = await stats_service.clear_all_data_except_tasks()
+
+                # Инвалидируем кэши: в памяти могли остаться удалённые пользователи,
+                # а их FSM-состояния больше не имеют смысла.
+                invalidate_user_cache()
+                await state_manager.clear_all()
 
                 await vk_client.send_message(
                     message.peer_id,

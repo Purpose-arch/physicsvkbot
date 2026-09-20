@@ -16,6 +16,7 @@ from src.keyboards.reply_keyboards import (
 from src.services.stats_service import StatsService
 from src.services.task_service import TaskService
 from src.services.user_service import UserService
+from src.utils import clean_input
 from src.vk_client import Message, vk_client
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ async def handle_admin_flow(message: Message):
     """Основной обработчик админ-панели: кнопки и FSM-состояния с гибким сопоставлением."""
     vk_id = message.from_id
     raw_text = message.text.strip() if message.text else ""
-    norm_text = raw_text.replace("\ufe0f", "").replace("\u200b", "").strip().lower()
+    norm_text = clean_input(raw_text)
 
     if not await is_admin_user(message):
         return
@@ -243,22 +244,30 @@ async def handle_admin_flow(message: Message):
             )
             return
 
-        # Валидация и сопоставление фото со строками по порядку
+        # Валидация и сопоставление фото со строками по порядку.
+        # Фото расходуются по одному на каждую ВАЛИДНУЮ строку: невалидные
+        # строки (номер не 1-20, пустой ответ) не «съедают» фото.
         valid_tasks: list[Task] = []
         errors: list[str] = []
-        for idx, (task_num, answer) in enumerate(entries):
+        photo_idx = 0
+        for task_num, answer in entries:
             if not (1 <= task_num <= 20):
                 errors.append(f"«{task_num}: {answer}» — номер должен быть 1-20")
                 continue
             if not answer:
                 errors.append(f"«{task_num}:» — пустой ответ")
                 continue
-            if idx >= len(photo_attachments):
+            if photo_idx >= len(photo_attachments):
                 errors.append(f"«{task_num}: {answer}» — не хватило фото")
                 continue
             valid_tasks.append(
-                Task(task_number=task_num, answer=answer, image_attachment=photo_attachments[idx])
+                Task(
+                    task_number=task_num,
+                    answer=answer,
+                    image_attachment=photo_attachments[photo_idx],
+                )
             )
+            photo_idx += 1
 
         if not valid_tasks:
             await vk_client.send_message(

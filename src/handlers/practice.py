@@ -12,7 +12,19 @@ from src.keyboards.inline_keyboards import get_task_action_keyboard
 from src.keyboards.reply_keyboards import get_main_menu_keyboard, get_task_keyboard
 from src.services.task_service import TaskService
 from src.services.user_service import UserService
+from src.utils import clean_input
 from src.vk_client import Message, vk_client
+
+
+def _normalize_answer(answer: str) -> str:
+    """Приводит ответ к сопоставимому виду: запятая -> точка, без пробелов,
+    без хвостовых нулей в десятичной дроби. Числовые ответы вида «5», «5.0»,
+    «5,00» считаются одинаковыми."""
+    s = clean_input(answer).replace(",", ".").replace(" ", "")
+    # Убираем хвостовые нули: 5.0 -> 5, 5.500 -> 5.5
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +114,7 @@ async def handle_practice_flow(message: Message):
     """Основной обработчик практики: выбор задания и проверка ответов."""
     vk_id = message.from_id
     raw_text = message.text.strip() if message.text else ""
-    norm_text = raw_text.replace("\ufe0f", "").replace("\u200b", "").strip().lower()
+    norm_text = clean_input(raw_text)
 
     state_data = await state_manager.get_data(vk_id)
     current_state = state_data.get("state")
@@ -139,8 +151,8 @@ async def handle_practice_flow(message: Message):
 
                 await user_service.get_or_create_user(vk_id)
 
-                user_answer = raw_text.replace(",", ".").strip().lower()
-                expected_clean = str(expected).replace(",", ".").strip().lower()
+                user_answer = _normalize_answer(raw_text)
+                expected_clean = _normalize_answer(str(expected))
                 is_correct = user_answer == expected_clean
 
                 await user_service.add_solved_task(vk_id, task_id)

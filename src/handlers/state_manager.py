@@ -85,5 +85,16 @@ class FSMStateManager:
         except Exception as e:
             logger.error(f"Error clearing state for {vk_id}: {e}")
 
+    async def clear_all(self):
+        """Полностью очищает все FSM-состояния (используется после удаления пользователей)."""
+        self._cache.clear()
+        try:
+            async with get_session() as session:
+                stmt = delete(UserStateModel)
+                await session.execute(stmt)
+                await session.commit()
+        except Exception as e:
+            logger.error(f"Error clearing all FSM states: {e}")
+
 
 state_manager = FSMStateManager()

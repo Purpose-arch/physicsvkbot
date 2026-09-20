@@ -60,4 +60,8 @@ async def process_registration(message: Message):
             await state_manager.clear_state(vk_id)
     except Exception as e:
         logger.error(f"Error in process_registration for VK ID {vk_id}: {e}", exc_info=True)
-        await vk_client.send_message(message.peer_id, "⚠️ Ошибка регистрации. Введите имя заново:")
+        # Сбрасываем состояние, иначе пользователь застрянет в текущем шаге
+        # (например, система будет ждать «10/11», а юзер введёт имя).
+        await state_manager.clear_state(vk_id)
+        await state_manager.set_state(vk_id, "waiting_for_first_name")
+        await vk_client.send_message(message.peer_id, "⚠️ Ошибка регистрации. Введи своё имя заново:")

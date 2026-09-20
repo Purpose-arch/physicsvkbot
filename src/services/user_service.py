@@ -11,8 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import settings
 from src.database.models import User
 
-# Кэшируемые скалярные поля пользователя (безопасно вне сессии)
+# Кэшируемые скалярные поля пользователя (безопасно вне сессии).
+# Ограничены по размеру, чтобы память не росла бесконечно.
 USER_CACHE: dict[int, dict] = {}
+USER_CACHE_MAX_SIZE = 10_000
+
+
+def _cache_put(vk_id: int, data: dict):
+    if len(USER_CACHE) >= USER_CACHE_MAX_SIZE and vk_id not in USER_CACHE:
+        USER_CACHE.pop(next(iter(USER_CACHE)), None)
+    USER_CACHE[vk_id] = data
 
 _CACHED_FIELDS = ("vk_id", "first_name", "grade", "solved_tasks", "is_admin")
 
@@ -31,7 +39,7 @@ class UserService:
         result = await self.session.execute(query)
         user = result.scalar_one_or_none()
         if user:
-            USER_CACHE[vk_id] = _cache_from_user(user)
+            _cache_put(vk_id, _cache_from_user(user))
         return user
 
     async def get_or_create_user(self, vk_id: int, first_name: str = "Ученик", grade: int = 11) -> User:
@@ -67,7 +75,7 @@ class UserService:
             user.is_admin = True
             await self.session.commit()
 
-        USER_CACHE[vk_id] = _cache_from_user(user)
+        _cache_put(vk_id, _cache_from_user(user))
         return user
 
     async def create_user(self, vk_id: int, first_name: str, grade: int) -> User:
@@ -83,7 +91,7 @@ class UserService:
         await self.session.commit()
         await self.session.refresh(user)
 
-        USER_CACHE[vk_id] = _cache_from_user(user)
+        _cache_put(vk_id, _cache_from_user(user))
         return user
 
     async def add_solved_task(self, vk_id: int, task_id: int):
@@ -109,7 +117,7 @@ class UserService:
         await self.session.commit()
 
         # Обновляем кэшированный снимок после коммита
-        USER_CACHE[vk_id] = _cache_from_user(user)
+        _cache_put(vk_id, _cache_from_user(user))
 
     async def sync_admin_status(self, vk_id: int) -> bool:
         should_be_admin = vk_id in settings.admin_ids_list
@@ -127,6 +135,10 @@ class UserService:
         return should_be_admin
 
 
-def invalidate_user_cache(vk_id: int):
-    """Удаляет пользователя из кэша (например, после удаления пользователя)."""
-    USER_CACHE.pop(vk_id, None)
+def invalidate_user_cache(vk_id: int | None = None):
+    """Удаляет пользователя из кэша; без аргумента очищает кэш целиком
+    (например, после массового удаления пользователей админом)."""
+    if vk_id is None:
+        USER_CACHE.clear()
+    else:
+        USER_CACHE.pop(vk_id, None)
