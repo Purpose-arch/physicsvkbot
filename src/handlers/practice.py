@@ -9,7 +9,6 @@ from src.database.database import get_session
 from src.handlers.state_manager import state_manager
 from src.keyboards.inline_keyboards import get_task_action_keyboard
 from src.keyboards.reply_keyboards import get_main_menu_keyboard, get_task_keyboard
-from src.services.chart_service import build_stats_chart, cleanup_chart
 from src.services.stats_service import StatsService
 from src.services.task_service import TaskService
 from src.services.user_service import UserService
@@ -235,16 +234,13 @@ async def handle_my_stats(message: Message):
 
 
 async def handle_bot_stats(message: Message):
-    """Показывает всем пользователям общую статистику бота и диаграммы."""
+    """Показывает всем пользователям текстовую общую статистику бота."""
     vk_id = message.from_id
-    chart_path: str | None = None
 
     try:
         async with get_session() as session:
             stats_service = StatsService(session)
             stats = await stats_service.get_bot_stats()
-            daily_answers = await stats_service.get_daily_answers(14)
-            daily_new_users = await stats_service.get_daily_new_users(14)
             accuracy_by_task = await stats_service.get_accuracy_by_task_number()
             top_users = await stats_service.get_top_users(5)
 
@@ -266,7 +262,6 @@ async def handle_bot_stats(message: Message):
             "",
             "📚 База заданий",
             f"• Всего заданий: {stats['tasks_total']}",
-            f"• Заполненных номеров: {stats['numbers_filled']}/20",
         ]
 
         if accuracy_by_task:
@@ -289,24 +284,6 @@ async def handle_bot_stats(message: Message):
             lines.append("Пока нет данных об активности.")
 
         await vk_client.send_message(message.peer_id, "\n".join(lines))
-
-        chart_path = build_stats_chart(
-            stats,
-            daily_answers,
-            daily_new_users,
-            accuracy_by_task,
-            top_users,
-        )
-        if chart_path:
-            attachment = await vk_client.upload_message_photo(message.peer_id, chart_path)
-            if attachment:
-                await vk_client.send_message(
-                    message.peer_id,
-                    "📈 Динамика общей статистики",
-                    attachment=attachment,
-                )
     except Exception:
         logger.exception(f"Error in handle_bot_stats for VK ID {vk_id}")
         await vk_client.send_message(message.peer_id, "Статистика временно недоступна")
-    finally:
-        cleanup_chart(chart_path)

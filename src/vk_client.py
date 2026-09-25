@@ -114,7 +114,6 @@ class VKClient:
             if "error" in data:
                 err = data["error"]
                 code = err.get("error_code", 0)
-                # 6 (слишком много запросов) и 10 (внутренняя ошибка сервера) — можно повторить
                 if code in (6, 9, 10):
                     await asyncio.sleep(backoff + random.random())
                     backoff = min(backoff * 2, 30)
@@ -142,8 +141,6 @@ class VKClient:
         except VKAPIError as e:
             if not attachment:
                 raise
-            # Сообщение не доставлено: скорее всего вложение устарело
-            # или отклонено VK. Повторяем один раз без него как fallback.
             logger.warning(f"VK rejected attachment '{attachment}' ({e}); retrying without it.")
             await self.call_method(
                 "messages.send",
@@ -152,69 +149,6 @@ class VKClient:
                 random_id=random.randint(0, 2**31 - 1),
                 **({"keyboard": keyboard} if keyboard else {}),
             )
-
-    async def upload_message_photo(self, peer_id: int, image_path: str) -> str | None:
-        """Загружает фото в VK и возвращает строку вложения для messages.send.
-
-        Возвращает None при любой ошибке, чтобы вызывающая сторона могла
-        отправить текстовый fallback вместо картинки.
-        """
-        import aiohttp
-
-        try:
-            upload_server = await self.call_method(
-                "photos.getMessagesUploadServer", peer_id=peer_id
-            )
-            upload_url = upload_server.get("upload_url")
-            if not upload_url:
-                return None
-
-            session = await self._get_session()
-            with open(image_path, "rb") as f:
-                form = aiohttp.FormData()
-                form.add_field("photo", f, filename="chart.png", content_type="image/png")
-                async with session.post(upload_url, data=form) as resp:
-                    uploaded = await resp.json()
-
-            # VK upload-сервер исторически возвращает поля в разных обёртках:
-            # непосредственно в объекте, в ``response`` или в первом элементе
-            # списка. Приводим все варианты к одному объекту до save-метода.
-            if isinstance(uploaded, list):
-                uploaded = uploaded[0] if uploaded else {}
-            if isinstance(uploaded, dict) and isinstance(uploaded.get("response"), (dict, list)):
-                uploaded = uploaded["response"]
-            if isinstance(uploaded, list):
-                uploaded = uploaded[0] if uploaded else {}
-            if not isinstance(uploaded, dict):
-                logger.error("VK upload server returned an unexpected response type: %s", type(uploaded).__name__)
-                return None
-
-            photo = uploaded.get("photo")
-            server = uploaded.get("server")
-            file_hash = uploaded.get("hash")
-            if not photo or not server or not file_hash:
-                logger.error(
-                    "VK upload server response is missing required fields "
-                    "(keys: %s)",
-                    sorted(uploaded.keys()),
-                )
-                return None
-
-            saved = await self.call_method(
-                "photos.saveMessagesPhoto",
-                photo=photo,
-                server=server,
-                hash=file_hash,
-            )
-            if not saved:
-                return None
-            if isinstance(saved, dict):
-                saved = [saved]
-            photo = saved[0]
-            return f"photo{photo['owner_id']}_{photo['id']}"
-        except Exception as e:
-            logger.error(f"Failed to upload message photo: {e}")
-            return None
 
     async def _refresh_longpoll_server(self) -> None:
         data = await self.call_method("groups.getLongPollServer", group_id=await self._get_group_id())
@@ -247,18 +181,17 @@ class VKClient:
 
         failed = data.get("failed")
         if failed:
-            if failed in (1, 3):  # потеряна история / истёк ts — ключ ещё действителен для 1, 2
+            if failed in (1, 3):
                 self._lp_ts = data.get("ts", self._lp_ts)
                 if failed == 3:
                     self._lp_server = None
             elif failed == 2:
-                self._lp_server = None  # ключ истёк
+                self._lp_server = None
             await asyncio.sleep(1)
             return None
 
         ts = data.get("ts")
         if ts is None:
-            # Некорректный ответ сервера: сбрасываем сессию для переподключения
             logger.warning("Long Poll response missing 'ts'; refreshing server...")
             self._lp_server = None
             await asyncio.sleep(1)
