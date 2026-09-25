@@ -1,3 +1,4 @@
 .env
 __pycache__/
 *.pyc
+uploaded_tasks.json

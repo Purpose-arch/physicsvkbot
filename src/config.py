@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        # Разрешаем лишние переменные в .env (например, VK_USER_TOKEN для
+        # служебного скрипта upload_tasks.py) — иначе pydantic_settings
+        # падает с ошибкой extra_forbidden.
+        extra = "ignore"
 
     @property
     def admin_ids_list(self) -> list[int]:

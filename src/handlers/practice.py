@@ -171,8 +171,17 @@ async def handle_practice_flow(message: Message):
                 "⚠️ Ошибка при проверке ответа. Попробуйте отправить его ещё раз.",
             )
         finally:
-            # Состояние очищается всегда, чтобы пользователь не застрял
-            await state_manager.clear_state(vk_id)
+            # Ожидание ответа сбрасываем, чтобы пользователь не застрял, но
+            # сохраняем режим (конкретный номер / случайное), чтобы кнопка
+            # «⏭️ Следующее задание» выдавала задание того же типа.
+            task_mode = state_data.get("task_mode", "random")
+            selected_number = state_data.get("selected_number")
+            await state_manager.set_state(
+                vk_id,
+                "after_answer",
+                task_mode=task_mode,
+                selected_number=selected_number,
+            )
         return
 
     # 3. Выбор случайного задания или конкретного номера (1-20)
