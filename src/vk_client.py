@@ -176,14 +176,40 @@ class VKClient:
                 async with session.post(upload_url, data=form) as resp:
                     uploaded = await resp.json()
 
+            # VK upload-сервер исторически возвращает поля в разных обёртках:
+            # непосредственно в объекте, в ``response`` или в первом элементе
+            # списка. Приводим все варианты к одному объекту до save-метода.
+            if isinstance(uploaded, list):
+                uploaded = uploaded[0] if uploaded else {}
+            if isinstance(uploaded, dict) and isinstance(uploaded.get("response"), (dict, list)):
+                uploaded = uploaded["response"]
+            if isinstance(uploaded, list):
+                uploaded = uploaded[0] if uploaded else {}
+            if not isinstance(uploaded, dict):
+                logger.error("VK upload server returned an unexpected response type: %s", type(uploaded).__name__)
+                return None
+
+            photo = uploaded.get("photo")
+            server = uploaded.get("server")
+            file_hash = uploaded.get("hash")
+            if not photo or not server or not file_hash:
+                logger.error(
+                    "VK upload server response is missing required fields "
+                    "(keys: %s)",
+                    sorted(uploaded.keys()),
+                )
+                return None
+
             saved = await self.call_method(
                 "photos.saveMessagesPhoto",
-                photo=uploaded.get("photo"),
-                server=uploaded.get("server"),
-                hash=uploaded.get("hash"),
+                photo=photo,
+                server=server,
+                hash=file_hash,
             )
             if not saved:
                 return None
+            if isinstance(saved, dict):
+                saved = [saved]
             photo = saved[0]
             return f"photo{photo['owner_id']}_{photo['id']}"
         except Exception as e:
