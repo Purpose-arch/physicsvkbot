@@ -19,8 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
   first_name    TEXT NOT NULL,             -- Имя пользователя
   grade         INT DEFAULT NULL,          -- Класс (10 или 11)
   solved_tasks  TEXT DEFAULT '',           -- Список ID решенных задач через запятую
-  created_at    TIMESTAMP DEFAULT NOW(),
-  is_admin      BOOLEAN DEFAULT FALSE
+  created_at    TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_vk_id ON users(vk_id);

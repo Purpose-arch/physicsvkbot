@@ -64,11 +64,3 @@ def get_task_action_keyboard() -> str:
     kb.row()
     kb.add("⬅️ Главное меню", color=ButtonColor.SECONDARY, payload={"action": "exit_to_menu"})
     return kb.get_json()
-
-
-def get_clear_data_confirmation_keyboard() -> str:
-    """Генерирует клавиатуру подтверждения очистки всех данных, кроме заданий"""
-    kb = VKKeyboard(inline=True)
-    kb.add("✅ Да, очистить", color=ButtonColor.NEGATIVE, payload={"action": "confirm_clear_data"})
-    kb.add("❌ Отмена", color=ButtonColor.SECONDARY, payload={"action": "cancel_clear_data"})
-    return kb.get_json()

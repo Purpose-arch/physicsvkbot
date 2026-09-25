@@ -29,7 +29,6 @@ class User(Base):
     grade = Column(Integer, nullable=True)
     solved_tasks = Column(Text, default="")
     created_at = Column(TIMESTAMP, server_default=func.now())
-    is_admin = Column(Boolean, default=False)
 
     answer_history = relationship(
         "AnswerHistory", back_populates="user", cascade="all, delete-orphan"

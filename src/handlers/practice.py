@@ -5,11 +5,12 @@
 import re
 import logging
 
-from src.config import settings
 from src.database.database import get_session
 from src.handlers.state_manager import state_manager
 from src.keyboards.inline_keyboards import get_task_action_keyboard
 from src.keyboards.reply_keyboards import get_main_menu_keyboard, get_task_keyboard
+from src.services.chart_service import build_stats_chart, cleanup_chart
+from src.services.stats_service import StatsService
 from src.services.task_service import TaskService
 from src.services.user_service import UserService
 from src.utils import clean_input
@@ -71,20 +72,19 @@ async def send_next_task(
 
         if not task:
             await state_manager.clear_state(vk_id)
-            is_admin = user.is_admin or (vk_id in settings.admin_ids_list)
-            kb = get_main_menu_keyboard(is_admin)
+            kb = get_main_menu_keyboard()
             if task_mode == "number" and selected_number:
                 await vk_client.send_message(
                     message.peer_id,
-                    f"🎉 В базе нет доступных нерешенных заданий №{selected_number}!\n"
-                    "Зайдите в '⚙️ Админ панель' -> '➕ Добавить задание' или выберите другой номер.",
+                    f"🎉 В базе нет доступных нерешённых заданий №{selected_number}!\n"
+                    "Выбери другой номер.",
                     keyboard=kb,
                 )
             else:
                 await vk_client.send_message(
                     message.peer_id,
                     "🎉 В базе пока нет доступных заданий!\n"
-                    "Перейдите в '⚙️ Админ панель' -> '➕ Добавить задание', чтобы занести задачи.",
+                    "Попробуй позже или выбери номер задания.",
                     keyboard=kb,
                 )
             return
@@ -122,12 +122,7 @@ async def handle_practice_flow(message: Message):
     # 1. Кнопка возврата в меню
     if "главное меню" in norm_text:
         await state_manager.clear_state(vk_id)
-        async with get_session() as session:
-            user_service = UserService(session)
-            user = await user_service.get_or_create_user(vk_id)
-            is_admin = user.is_admin or (vk_id in settings.admin_ids_list)
-
-        await vk_client.send_message(message.peer_id, "Главное меню 👇", keyboard=get_main_menu_keyboard(is_admin))
+        await vk_client.send_message(message.peer_id, "Главное меню 👇", keyboard=get_main_menu_keyboard())
         return
 
     # 2. ПРИОРИТЕТНАЯ ПРОВЕРКА ОТВЕТА ПОЛЬЗОВАТЕЛЯ
@@ -237,3 +232,81 @@ async def handle_my_stats(message: Message):
     except Exception as e:
         logger.error(f"Error in handle_my_stats for VK ID {vk_id}: {e}", exc_info=True)
         await vk_client.send_message(message.peer_id, "📈 Статистика временно недоступна. Попробуйте еще раз позже.")
+
+
+async def handle_bot_stats(message: Message):
+    """Показывает всем пользователям общую статистику бота и диаграммы."""
+    vk_id = message.from_id
+    chart_path: str | None = None
+
+    try:
+        async with get_session() as session:
+            stats_service = StatsService(session)
+            stats = await stats_service.get_bot_stats()
+            daily_answers = await stats_service.get_daily_answers(14)
+            daily_new_users = await stats_service.get_daily_new_users(14)
+            accuracy_by_task = await stats_service.get_accuracy_by_task_number()
+            top_users = await stats_service.get_top_users(5)
+
+        lines = [
+            "📊 Общая статистика бота",
+            f"📅 Данные на {stats['date']}",
+            "",
+            "👥 Пользователи",
+            f"• Всего: {stats['users_count']}",
+            f"• Новых сегодня: {stats['new_users_today']}",
+            f"• Активных за неделю: {stats['active_users_week']}",
+            "",
+            "📝 Ответы",
+            f"• Всего: {stats['total_answers']}",
+            f"• Сегодня: {stats['answers_today']}",
+            f"• Верных: {stats['correct_answers']}",
+            f"• Неверных: {stats['incorrect_answers']}",
+            f"• Средняя точность: {stats['avg_accuracy']:.1f}%",
+            "",
+            "📚 База заданий",
+            f"• Всего заданий: {stats['tasks_total']}",
+            f"• Заполненных номеров: {stats['numbers_filled']}/20",
+        ]
+
+        if accuracy_by_task:
+            lines.extend(["", "Точность по номерам:"])
+            for item in accuracy_by_task:
+                lines.append(
+                    f"• №{item['number']}: {item['accuracy']:.0f}% "
+                    f"({item['correct']}/{item['total']})"
+                )
+
+        lines.extend(["", "🏆 Топ активных"])
+        if top_users:
+            for position, user in enumerate(top_users, start=1):
+                name = user.get("first_name") or "Без имени"
+                lines.append(
+                    f"{position}. {name}: {user['total']} ответов, "
+                    f"точность {user['accuracy']:.0f}%"
+                )
+        else:
+            lines.append("Пока нет данных об активности.")
+
+        await vk_client.send_message(message.peer_id, "\n".join(lines))
+
+        chart_path = build_stats_chart(
+            stats,
+            daily_answers,
+            daily_new_users,
+            accuracy_by_task,
+            top_users,
+        )
+        if chart_path:
+            attachment = await vk_client.upload_message_photo(message.peer_id, chart_path)
+            if attachment:
+                await vk_client.send_message(
+                    message.peer_id,
+                    "📈 Динамика общей статистики",
+                    attachment=attachment,
+                )
+    except Exception:
+        logger.exception(f"Error in handle_bot_stats for VK ID {vk_id}")
+        await vk_client.send_message(message.peer_id, "Статистика временно недоступна")
+    finally:
+        cleanup_chart(chart_path)

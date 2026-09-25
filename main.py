@@ -6,15 +6,17 @@ import re
 from aiohttp import web
 
 from src.config import settings, validate_settings
-from src.database.database import create_tables, get_session
+from src.database.database import create_tables
 from src.handlers.state_manager import state_manager
 from src.handlers.start import handle_start
 from src.handlers.registration import process_registration
-from src.handlers.practice import handle_practice_flow, handle_my_stats, send_next_task
-from src.handlers.admin import handle_admin_flow, is_admin_user
-from src.keyboards.reply_keyboards import get_main_menu_keyboard, get_admin_panel_keyboard
-from src.services.user_service import UserService, invalidate_user_cache
-from src.services.stats_service import StatsService
+from src.handlers.practice import (
+    handle_bot_stats,
+    handle_my_stats,
+    handle_practice_flow,
+    send_next_task,
+)
+from src.keyboards.reply_keyboards import get_main_menu_keyboard
 from src.utils import clean_input
 from src.vk_client import Message, VKAPIError, vk_client
 
@@ -150,36 +152,11 @@ async def _process_update_inner(message: Message):
 
         if action == "exit_to_menu" or "главное меню" in norm_text:
             await state_manager.clear_state(vk_id)
-            async with get_session() as session:
-                user_service = UserService(session)
-                user = await user_service.get_or_create_user(vk_id)
-                is_admin = user.is_admin or (vk_id in settings.admin_ids_list)
-
-            await vk_client.send_message(message.peer_id, "Главное меню 👇", keyboard=get_main_menu_keyboard(is_admin))
-            return
-
-        if action == "confirm_clear_data":
-            if await is_admin_user(message):
-                async with get_session() as session:
-                    stats_service = StatsService(session)
-                    counts = await stats_service.clear_all_data_except_tasks()
-
-                # Инвалидируем кэши: в памяти могли остаться удалённые пользователи,
-                # а их FSM-состояния больше не имеют смысла.
-                invalidate_user_cache()
-                await state_manager.clear_all()
-
-                await vk_client.send_message(
-                    message.peer_id,
-                    "✅ Данные успешно очищены:\n\n"
-                    f"👥 Пользователей удалено: {counts['users']}\n"
-                    f"📝 Записей истории удалено: {counts['answer_history']}",
-                    keyboard=get_admin_panel_keyboard()
-                )
-            return
-
-        if action == "cancel_clear_data":
-            await vk_client.send_message(message.peer_id, "❌ Очистка данных отменена.", keyboard=get_admin_panel_keyboard())
+            await vk_client.send_message(
+                message.peer_id,
+                "Главное меню 👇",
+                keyboard=get_main_menu_keyboard(),
+            )
             return
 
         # 2. Старт / Сброс
@@ -188,32 +165,20 @@ async def _process_update_inner(message: Message):
             return
 
         # 3. Приоритетные кнопки переключения меню (Мгновенное срабатывание с 1-го клика)
-        if "админ панель" in norm_text and not ("добавление" in norm_text or "шаг" in norm_text):
-            await handle_admin_flow(message)
-            return
-
         if "моя статистика" in norm_text:
             await state_manager.clear_state(vk_id)
             await handle_my_stats(message)
             return
 
-        # Кнопка «📊 Статистика» из админ-панели: передаём в админ-обработчик,
-        # который сам проверит права и покажет статистику бота.
+        # Кнопка «📊 Статистика» доступна всем пользователям.
         if "статистика" in norm_text and "моя" not in norm_text:
-            await handle_admin_flow(message)
+            await handle_bot_stats(message)
             return
 
         # 4. Проверка состояний FSM
         # Регистрация
         if current_state in ("waiting_for_first_name", "waiting_for_grade"):
             await process_registration(message)
-            return
-
-        # Админ состояния
-        if current_state in ("waiting_for_task_number", "waiting_for_task_photo", "waiting_for_task_answer", "waiting_for_bulk_tasks") or (
-            "добавить задание" in norm_text or "массовое добавление" in norm_text or "очистить данные" in norm_text
-        ):
-            await handle_admin_flow(message)
             return
 
         # 5. Практика и проверка ответов

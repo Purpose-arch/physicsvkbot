@@ -153,6 +153,43 @@ class VKClient:
                 **({"keyboard": keyboard} if keyboard else {}),
             )
 
+    async def upload_message_photo(self, peer_id: int, image_path: str) -> str | None:
+        """Загружает фото в VK и возвращает строку вложения для messages.send.
+
+        Возвращает None при любой ошибке, чтобы вызывающая сторона могла
+        отправить текстовый fallback вместо картинки.
+        """
+        import aiohttp
+
+        try:
+            upload_server = await self.call_method(
+                "photos.getMessagesUploadServer", peer_id=peer_id
+            )
+            upload_url = upload_server.get("upload_url")
+            if not upload_url:
+                return None
+
+            session = await self._get_session()
+            with open(image_path, "rb") as f:
+                form = aiohttp.FormData()
+                form.add_field("photo", f, filename="chart.png", content_type="image/png")
+                async with session.post(upload_url, data=form) as resp:
+                    uploaded = await resp.json()
+
+            saved = await self.call_method(
+                "photos.saveMessagesPhoto",
+                photo=uploaded.get("photo"),
+                server=uploaded.get("server"),
+                hash=uploaded.get("hash"),
+            )
+            if not saved:
+                return None
+            photo = saved[0]
+            return f"photo{photo['owner_id']}_{photo['id']}"
+        except Exception as e:
+            logger.error(f"Failed to upload message photo: {e}")
+            return None
+
     async def _refresh_longpoll_server(self) -> None:
         data = await self.call_method("groups.getLongPollServer", group_id=await self._get_group_id())
         self._lp_server = data["server"]
