@@ -15,12 +15,13 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
+SQLITE_BIGINT_PK = BigInteger().with_variant(Integer, "sqlite")
 
 
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
     vk_id = Column(BigInteger, unique=True, nullable=False, index=True)
     first_name = Column(String(100), nullable=False, default="Ученик")
     grade = Column(Integer, nullable=True)
@@ -35,7 +36,7 @@ class User(Base):
 class Task(Base):
     __tablename__ = "tasks"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
     task_number = Column(Integer, nullable=False, index=True)
     answer = Column(Text, nullable=False)
     image_attachment = Column(String(255), nullable=True)
@@ -46,14 +47,14 @@ class Task(Base):
 
     __table_args__ = (
         CheckConstraint("task_number BETWEEN 1 AND 20", name="ck_tasks_number"),
-        CheckConstraint("btrim(answer) <> ''", name="ck_tasks_answer_not_empty"),
+        CheckConstraint("trim(answer) <> ''", name="ck_tasks_answer_not_empty"),
     )
 
 
 class AnswerHistory(Base):
     __tablename__ = "answer_history"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(SQLITE_BIGINT_PK, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     task_id = Column(BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
     is_correct = Column(Boolean, nullable=False)

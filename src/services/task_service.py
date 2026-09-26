@@ -4,10 +4,10 @@ import logging
 from typing import Optional
 
 from sqlalchemy import and_, func, select
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.database.models import AnswerHistory, Task, User, UserSolvedTask
+from src.database.models import AnswerHistory, Task, UserSolvedTask
+from src.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +33,33 @@ class TaskService:
         )
         return {"total": total or 0, "solved": solved or 0}
 
-    async def record_answer(self, user: User, task_id: int, is_correct: bool) -> None:
-        """Record an attempt and progress in one transaction; safe to retry."""
-        self.session.add(AnswerHistory(user_id=user.id, task_id=task_id, is_correct=is_correct))
-        if is_correct:
-            statement = insert(UserSolvedTask).values(user_id=user.id, task_id=task_id)
-            statement = statement.on_conflict_do_nothing(index_elements=["user_id", "task_id"])
-            await self.session.execute(statement)
-        await self.session.commit()
+    async def record_answer(self, vk_id: int, task_id: int, is_correct: bool) -> None:
+        """Create the user, attempt, and solved-task row atomically.
+
+        The public VK ID is the source of truth.  Resolving it in this same
+        transaction prevents an answer from depending on a stale ORM user ID.
+        """
+        try:
+            task = await self.session.scalar(
+                select(Task.id).where(Task.id == task_id, Task.is_active.is_(True))
+            )
+            if task is None:
+                raise ValueError(f"Task {task_id} does not exist or is inactive")
+
+            user, _ = await UserService(self.session).ensure_user(vk_id)
+            self.session.add(
+                AnswerHistory(user_id=user.id, task_id=task_id, is_correct=is_correct)
+            )
+            if is_correct:
+                solved_key = await self.session.get(
+                    UserSolvedTask, {"user_id": user.id, "task_id": task_id}
+                )
+                if solved_key is None:
+                    self.session.add(UserSolvedTask(user_id=user.id, task_id=task_id))
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            raise
 
     async def get_user_stats(self, user_id: int) -> dict:
         result = await self.session.execute(

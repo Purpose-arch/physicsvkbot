@@ -74,12 +74,18 @@ async def handle_practice_flow(message: Message):
                 await vk_client.send_message(message.peer_id, "⚠️ Состояние потеряно. Выбери задание заново.", keyboard=get_task_action_keyboard())
                 return
             async with get_session() as session:
-                user = await UserService(session).get_or_create_user(vk_id)
                 is_correct = _normalize_answer(raw_text) == _normalize_answer(str(expected))
-                await TaskService(session).record_answer(user, int(task_id), is_correct)
+                await TaskService(session).record_answer(vk_id, int(task_id), is_correct)
             await vk_client.send_message(
                 message.peer_id,
                 f"{'✅ Верно!' if is_correct else '❌ Неправильно'}\nПравильный ответ: {expected}",
+                keyboard=get_task_action_keyboard(),
+            )
+        except ValueError as exc:
+            logger.warning("Cannot record answer for VK ID %s: %s", vk_id, exc)
+            await vk_client.send_message(
+                message.peer_id,
+                "⚠️ Задание больше недоступно. Выбери задание заново.",
                 keyboard=get_task_action_keyboard(),
             )
         except Exception:
