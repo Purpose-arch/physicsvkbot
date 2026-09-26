@@ -3,7 +3,8 @@
 from typing import Optional
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.database.models import User
 
@@ -17,30 +18,21 @@ class UserService:
         return result.scalar_one_or_none()
 
     async def ensure_user(self, vk_id: int, first_name: str = "Ученик", grade: int = 11) -> tuple[User, bool]:
-        """Return the user, inserting it if necessary, without committing.
-
-        The insert runs in a savepoint.  If two requests create the same VK user
-        concurrently, PostgreSQL resolves the unique constraint and the losing
-        transaction can safely load the committed row.
-        """
+        """Upsert and return the current database row without committing."""
+        dialect = self.session.bind.dialect.name
+        insert = postgresql_insert(User) if dialect == "postgresql" else sqlite_insert(User)
+        statement = insert.values(vk_id=vk_id, first_name=first_name, grade=grade)
+        statement = statement.on_conflict_do_update(
+            index_elements=["vk_id"],
+            set_={"vk_id": statement.excluded.vk_id},
+        ).returning(User.id)
+        user_id = await self.session.scalar(statement)
         user = await self.get_user_by_vk_id(vk_id)
-        if user is not None:
-            return user, False
-
-        try:
-            async with self.session.begin_nested():
-                user = User(vk_id=vk_id, first_name=first_name, grade=grade)
-                self.session.add(user)
-                await self.session.flush()
-            return user, True
-        except IntegrityError:
-            user = await self.get_user_by_vk_id(vk_id)
-            if user is None:
-                raise
-            return user, False
+        if user is None or user.id != user_id:
+            raise RuntimeError(f"Failed to resolve user by VK ID {vk_id}")
+        return user, False
 
     async def get_or_create_user(self, vk_id: int, first_name: str = "Ученик", grade: int = 11) -> User:
-        user, created = await self.ensure_user(vk_id, first_name, grade)
-        if created:
-            await self.session.commit()
+        user, _ = await self.ensure_user(vk_id, first_name, grade)
+        await self.session.commit()
         return user

@@ -4,6 +4,8 @@ import logging
 from typing import Optional
 
 from sqlalchemy import and_, func, select
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models import AnswerHistory, Task, UserSolvedTask
@@ -47,15 +49,18 @@ class TaskService:
                 raise ValueError(f"Task {task_id} does not exist or is inactive")
 
             user, _ = await UserService(self.session).ensure_user(vk_id)
+            if is_correct:
+                dialect = self.session.bind.dialect.name
+                insert = postgresql_insert(UserSolvedTask) if dialect == "postgresql" else sqlite_insert(UserSolvedTask)
+                statement = insert.values(user_id=user.id, task_id=task_id)
+                statement = statement.on_conflict_do_nothing(
+                    index_elements=["user_id", "task_id"]
+                )
+                await self.session.execute(statement)
+
             self.session.add(
                 AnswerHistory(user_id=user.id, task_id=task_id, is_correct=is_correct)
             )
-            if is_correct:
-                solved_key = await self.session.get(
-                    UserSolvedTask, {"user_id": user.id, "task_id": task_id}
-                )
-                if solved_key is None:
-                    self.session.add(UserSolvedTask(user_id=user.id, task_id=task_id))
             await self.session.commit()
         except Exception:
             await self.session.rollback()
