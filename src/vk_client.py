@@ -50,31 +50,6 @@ class Message:
             _raw=obj,
         )
 
-    def get_attachment_strings(self) -> list[str]:
-        """Возвращает строки вложений вида 'photo123_456' из сырого обновления."""
-        result: list[str] = []
-        attachments = self._raw.get("attachments") or []
-        if isinstance(attachments, dict):
-            attachments = list(attachments.values())
-        for att in attachments:
-            if not isinstance(att, dict):
-                continue
-            att_type = att.get("type")
-            att_obj = att.get(att_type)
-            if not att_obj:
-                continue
-            owner_id = att_obj.get("owner_id")
-            att_id = att_obj.get("id")
-            access_key = att_obj.get("access_key") or ""
-            if owner_id and att_id:
-                result.append(
-                    f"{att_type}{owner_id}_{att_id}_{access_key}"
-                    if access_key
-                    else f"{att_type}{owner_id}_{att_id}"
-                )
-        return result
-
-
 class VKClient:
     """Обёртка над VK API + слушатель Long Poll."""
 

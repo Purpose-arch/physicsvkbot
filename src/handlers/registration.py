@@ -7,7 +7,7 @@ from src.database.database import get_session
 from src.handlers.state_manager import state_manager
 from src.keyboards.reply_keyboards import get_main_menu_keyboard
 from src.services.user_service import UserService
-from src.utils import clean_input, contains_profanity
+from src.utils import clean_input
 from src.vk_client import Message, vk_client
 
 logger = logging.getLogger(__name__)
@@ -24,13 +24,6 @@ async def process_registration(message: Message):
             name = clean_input(text)
             if not name or len(text) > 50:
                 await vk_client.send_message(message.peer_id, "Пожалуйста, введи корректное имя (не длиннее 50 символов).")
-                return
-
-            if contains_profanity(name):
-                await vk_client.send_message(
-                    message.peer_id,
-                    "🚫 Пожалуйста, введи вежливое имя без нецензурных слов.",
-                )
                 return
 
             await state_manager.set_state(vk_id, "waiting_for_grade", first_name=text)
