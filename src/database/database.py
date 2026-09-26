@@ -55,11 +55,21 @@ async def create_tables():
     """Создать/обновить схему базы и прогреть пул соединений.
 
     ``metadata.create_all`` не изменяет уже созданные таблицы. Поэтому после
-    create_all выполняется безопасная идемпотентная миграция для добавленных
-    позднее полей (в частности, ``user_fsm_states.updated_at``).
+    create_all выполняются безопасные идемпотентные миграции для добавленных
+    позднее полей (в частности, ``tasks.is_active`` и
+    ``user_fsm_states.updated_at``).
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE tasks
+                ADD COLUMN IF NOT EXISTS is_active BOOLEAN
+                NOT NULL DEFAULT TRUE
+                """
+            )
+        )
         await conn.execute(
             text(
                 """
