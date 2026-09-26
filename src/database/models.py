@@ -12,7 +12,6 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -80,5 +79,5 @@ class UserStateModel(Base):
 
     vk_id = Column(BigInteger, primary_key=True, index=True)
     state = Column(String(100), nullable=True)
-    data_json = Column(JSONB, nullable=True)
+    data_json = Column(Text, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

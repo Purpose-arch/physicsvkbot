@@ -52,11 +52,23 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def create_tables():
-    """
-    Создаёт все таблицы в базе данных и прогревает соединения с БД
+    """Создать/обновить схему базы и прогреть пул соединений.
+
+    ``metadata.create_all`` не изменяет уже созданные таблицы. Поэтому после
+    create_all выполняется безопасная идемпотентная миграция для добавленных
+    позднее полей (в частности, ``user_fsm_states.updated_at``).
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(
+            text(
+                """
+                ALTER TABLE user_fsm_states
+                ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ
+                NOT NULL DEFAULT NOW()
+                """
+            )
+        )
 
     # Прогрев пула соединений БД для устранения задержек при первом запросе
     try:
