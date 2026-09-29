@@ -60,13 +60,116 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+async def _legacy_user_fk_name(conn, table: str) -> str | None:
+    """Имя FK-констрейнта ``user_id``, если он ещё ссылается на ``users(vk_id)``."""
+    result = await conn.execute(
+        text(
+            """
+            SELECT c.conname
+              FROM pg_constraint c
+              JOIN pg_class ref ON ref.oid = c.confrelid
+              JOIN pg_attribute a
+                ON a.attrelid = c.confrelid
+               AND a.attnum = ANY (c.confkey)
+             WHERE c.conrelid = to_regclass(:tbl)
+               AND c.contype = 'f'
+               AND ref.relname = 'users'
+               AND a.attname = 'vk_id'
+             LIMIT 1
+            """
+        ),
+        {"tbl": table},
+    )
+    return result.scalar()
+
+
+async def _migrate_legacy_user_fks(conn) -> None:
+    """Перенаправить устаревший внешний ключ ``user_id`` с ``users(vk_id)`` на ``users(id)``.
+
+    Старая схема хранила в ``*_user_id`` внешний идентификатор ВК
+    (``users.vk_id``). Новый код использует внутренний первичный ключ
+    ``users.id``. Миграция идемпотентна и безопасна:
+
+    * срабатывает, только пока констрейнт ещё ссылается на ``users(vk_id)``;
+    * переводит уже сохранённые значения ``vk_id -> users.id``, не трогая
+      строки, где значение уже является корректным ``users.id``;
+    * удаляет «осиротевшие» строки и дубли PK (для ``user_solved_tasks``),
+      чтобы пересоздание FK гарантированно прошло;
+    * пересоздаёт FK на ``users(id)`` с тем же ``ON DELETE CASCADE``.
+
+    Только для PostgreSQL — на SQLite вызывается ветвление до вызова.
+    """
+    for table in ("answer_history", "user_solved_tasks"):
+        conname = await _legacy_user_fk_name(conn, table)
+        if not conname:
+            continue
+
+        # 1. Снимаем старый констрейнт, чтобы разрешить перезапись значений.
+        await conn.execute(text(f'ALTER TABLE "{table}" DROP CONSTRAINT "{conname}"'))
+
+        # 2. Переводим уже сохранённые значения vk_id -> users.id.
+        #    Guard `NOT EXISTS users.id = value` оставляет нетронутыми строки,
+        #    где значение уже является валидным users.id (защита от пересечения
+        #    пространств id и vk_id).
+        await conn.execute(
+            text(
+                f"""
+                UPDATE "{table}" t
+                   SET user_id = u.id
+                  FROM users u
+                 WHERE t.user_id = u.vk_id
+                   AND t.user_id <> u.id
+                   AND NOT EXISTS (SELECT 1 FROM users x WHERE x.id = t.user_id)
+                """
+            )
+        )
+
+        # 3. Удаляем строки без родителя (в норме их быть не может из-за
+        #    ON DELETE CASCADE, но это гарантирует успех пересоздания FK).
+        await conn.execute(
+            text(
+                f"""
+                DELETE FROM "{table}" t
+                 WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id)
+                """
+            )
+        )
+
+        # 4. Для составного PK убираем возможные дубли после перемаппинга.
+        if table == "user_solved_tasks":
+            await conn.execute(
+                text(
+                    """
+                    DELETE FROM user_solved_tasks a
+                     USING user_solved_tasks b
+                     WHERE a.ctid < b.ctid
+                       AND a.user_id = b.user_id
+                       AND a.task_id = b.task_id
+                    """
+                )
+            )
+
+        # 5. Пересоздаём FK на users(id) с тем же поведением ON DELETE CASCADE.
+        await conn.execute(
+            text(
+                f"""
+                ALTER TABLE "{table}"
+                ADD CONSTRAINT {table}_user_id_fkey
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                """
+            )
+        )
+        logger.info("Migrated legacy user_id FK on table %s (was -> users.vk_id).", table)
+
+
 async def create_tables():
     """Создать/обновить схему базы и прогреть пул соединений.
 
     ``metadata.create_all`` не изменяет уже созданные таблицы. Поэтому после
-    create_all выполняются безопасные идемпотентные миграции для добавленных
-    позднее полей (в частности, ``tasks.is_active`` и
-    ``user_fsm_states.updated_at``).
+    create_all выполняются безопасные идемпотентные миграции: добавление
+    позднее введённых полей (``tasks.is_active``, ``user_fsm_states.updated_at``)
+    и перенаправление устаревшего внешнего ключа ``user_id`` с ``users(vk_id)``
+    на ``users(id)``.
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -88,6 +191,9 @@ async def create_tables():
                 """
             )
         )
+        # Перенаправляем устаревший FK user_id -> users(id) (только PostgreSQL).
+        if settings.database_url.startswith("postgresql"):
+            await _migrate_legacy_user_fks(conn)
 
     # Прогрев пула соединений БД для устранения задержек при первом запросе
     try:
