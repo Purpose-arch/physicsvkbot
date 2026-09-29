@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import random
+import time
 from dataclasses import dataclass, field
 
 import aiohttp
@@ -59,6 +60,10 @@ class VKClient:
         self._lp_server: str | None = None
         self._lp_key: str | None = None
         self._lp_ts: str | None = None
+        # Простой token-bucket для исходящих сообщений (сглаживает лимиты VK).
+        self._send_lock = asyncio.Lock()
+        self._send_tokens = float(settings.vk_send_burst)
+        self._send_refill_ts = time.monotonic()
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -98,6 +103,29 @@ class VKClient:
 
         raise last_exc or VKAPIError(-1, f"Failed to call {method} after retries")
 
+    async def _acquire_send_slot(self) -> None:
+        """Ограничивает темп исходящих сообщений (token-bucket).
+
+        Не влияет на корректность — только плавно распределяет отправку во
+        времени, чтобы заранее сгладить всплески и реже ловить ошибку 6 (VK).
+        """
+        rate = settings.vk_send_rate
+        burst = settings.vk_send_burst
+        if rate <= 0:
+            return
+        async with self._send_lock:
+            now = time.monotonic()
+            elapsed = now - self._send_refill_ts
+            if elapsed > 0:
+                self._send_tokens = min(burst, self._send_tokens + elapsed * rate)
+                self._send_refill_ts = now
+            if self._send_tokens < 1:
+                await asyncio.sleep((1 - self._send_tokens) / rate)
+                self._send_tokens = 0.0
+                self._send_refill_ts = time.monotonic()
+            else:
+                self._send_tokens -= 1
+
     async def send_message(
         self,
         peer_id: int,
@@ -106,6 +134,7 @@ class VKClient:
         attachment: str | None = None,
     ) -> None:
         """Отправляет сообщение; при отклонении повторяет один раз без вложения."""
+        await self._acquire_send_slot()
         params = {"peer_id": peer_id, "message": text, "random_id": random.randint(0, 2**31 - 1)}
         if keyboard:
             params["keyboard"] = keyboard

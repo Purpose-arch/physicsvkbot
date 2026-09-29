@@ -35,6 +35,18 @@ _user_error_notify_ts: dict[int, float] = {}
 DEDUP_TTL = 300  # секунд хранения ключей обработанных сообщений
 _processed_messages: dict[tuple[int, int], float] = {}
 
+# --- Глобальный семафор: ограничивает число одновременно обрабатываемых
+# апдейтов, чтобы всплеск сообщений не исчерпал пул соединений БД. ---
+_update_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_update_semaphore() -> asyncio.Semaphore:
+    global _update_semaphore
+    if _update_semaphore is None:
+        # Создаём лениво (внутри запущенного event loop) для совместимости.
+        _update_semaphore = asyncio.Semaphore(max(1, settings.max_concurrent_updates))
+    return _update_semaphore
+
 
 def _is_duplicate(message: Message) -> bool:
     """True, если такое сообщение уже обрабатывалось недавно."""
@@ -104,11 +116,14 @@ async def process_update(message: Message):
             logger.info(f"Duplicate message from VK ID {message.from_id} ignored")
             return
 
-        # Сериализуем обработку сообщений одного пользователя:
-        # параллельные апдейты от одного человека ждут своей очереди,
-        # поэтому состояние FSM и история ответов не страдают от гонок.
-        async with _get_user_lock(message.from_id):
-            await _process_update_inner(message)
+        # Глобальный лимит параллелизма: при залпе сообщений лишние апдейты
+        # ждут освобождения слота, а не создают лавину запросов к БД.
+        async with _get_update_semaphore():
+            # Сериализуем обработку сообщений одного пользователя:
+            # параллельные апдейты от одного человека ждут своей очереди,
+            # поэтому состояние FSM и история ответов не страдают от гонок.
+            async with _get_user_lock(message.from_id):
+                await _process_update_inner(message)
     except VKAPIError as e:
         if e.code == 912:
             # Сообщество не разрешает боту писать в этот чат.

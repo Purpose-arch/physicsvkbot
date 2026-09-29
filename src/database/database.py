@@ -25,6 +25,15 @@ def _build_engine_kwargs() -> dict:
     if settings.database_url.startswith("postgresql"):
         # Отключаем подготовленные выражения asyncpg (важно за pgbouncer)
         kwargs["connect_args"] = {"statement_cache_size": 0}
+        # Явный размер пула вместо дефолтных 5 + overflow 10 = 15.
+        # Размер подобран так, чтобы выдерживать залповую нагрузку, оставаясь
+        # в рамках лимитов пулера Supabase. Все значения задаются через .env.
+        kwargs["pool_size"] = settings.db_pool_size
+        kwargs["max_overflow"] = settings.db_max_overflow
+        kwargs["pool_timeout"] = settings.db_pool_timeout
+        # Проверяем «свежесть» соединений по таймеру, чтобы не ловить обрывы
+        # со стороны пулера Supabase на простаивающих соединениях.
+        kwargs["pool_recycle"] = settings.db_pool_recycle
     return kwargs
 
 
